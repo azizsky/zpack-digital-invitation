@@ -3,28 +3,66 @@
 import { useState } from "react";
 import { BasicWeddingContent } from "@/types/wedding";
 
+interface TemplateItem {
+  id: string | number;
+  nama_template?: string;
+  nama?: string;
+  name?: string;
+  deskripsi?: string;
+  description?: string;
+  slug?: string;
+}
+
 interface BasicFieldsProps {
   formData: BasicWeddingContent;
   onChange: (
-    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
+    e: React.ChangeEvent<
+      HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
+    >
   ) => void;
+  templates?: TemplateItem[] | { success?: boolean; data?: TemplateItem[] } | any;
 }
 
-export default function BasicFields({ formData, onChange }: BasicFieldsProps) {
-  // State kontrol waktu Akad
+export default function BasicFields({
+  formData,
+  onChange,
+  templates = [],
+}: BasicFieldsProps) {
+  // 🔍 [DEBUG] Cek props templates yang diterima oleh BasicFields
+  console.log("🎨 [BASIC_FIELDS] Raw templates prop received:", templates);
+
+  // Checkbox samakan tanggal (Default: TRUE)
+  const [sameAsAkadDate, setSameAsAkadDate] = useState(true);
+
+  // Checkbox s/d Selesai (Default: FALSE)
+  const [akadSelesai, setAkadSelesai] = useState(false);
+  const [resepsiSelesai, setResepsiSelesai] = useState(false);
+
+  // State waktu Akad
   const [akadStart, setAkadStart] = useState("08:00");
   const [akadEnd, setAkadEnd] = useState("10:00");
-  const [akadSelesai, setAkadSelesai] = useState(true);
   const [akadTz, setAkadTz] = useState("WIB");
 
-  // State kontrol waktu Resepsi
+  // State waktu Resepsi
   const [resepsiStart, setResepsiStart] = useState("11:00");
   const [resepsiEnd, setResepsiEnd] = useState("14:00");
-  const [resepsiSelesai, setResepsiSelesai] = useState(false);
   const [resepsiTz, setResepsiTz] = useState("WIB");
 
-  // Helper merakit format string waktu Akad
-  const updateWaktuAkad = (start: string, end: string, isSelesai: boolean, tz: string) => {
+  // Auto-Unwrap: Ekstrak array template terlepas dari format passing props-nya
+  const rawList = Array.isArray(templates)
+    ? templates
+    : templates?.data || templates?.results || [];
+
+  // 🔍 [DEBUG] Cek hasil unwrap rawList
+  console.log("🎨 [BASIC_FIELDS] Parsed rawList array:", rawList, "Length:", rawList?.length);
+
+  // Helper waktu Akad
+  const updateWaktuAkad = (
+    start: string,
+    end: string,
+    isSelesai: boolean,
+    tz: string
+  ) => {
     setAkadStart(start);
     setAkadEnd(end);
     setAkadSelesai(isSelesai);
@@ -33,11 +71,16 @@ export default function BasicFields({ formData, onChange }: BasicFieldsProps) {
     const result = `${start} ${isSelesai ? "- Selesai" : `- ${end}`} ${tz}`;
     onChange({
       target: { name: "waktuAkad", value: result },
-    } as React.ChangeEvent<HTMLInputElement>);
+    } as unknown as React.ChangeEvent<HTMLInputElement>);
   };
 
-  // Helper merakit format string waktu Resepsi
-  const updateWaktuResepsi = (start: string, end: string, isSelesai: boolean, tz: string) => {
+  // Helper waktu Resepsi
+  const updateWaktuResepsi = (
+    start: string,
+    end: string,
+    isSelesai: boolean,
+    tz: string
+  ) => {
     setResepsiStart(start);
     setResepsiEnd(end);
     setResepsiSelesai(isSelesai);
@@ -46,11 +89,74 @@ export default function BasicFields({ formData, onChange }: BasicFieldsProps) {
     const result = `${start} ${isSelesai ? "- Selesai" : `- ${end}`} ${tz}`;
     onChange({
       target: { name: "waktuResepsi", value: result },
-    } as React.ChangeEvent<HTMLInputElement>);
+    } as unknown as React.ChangeEvent<HTMLInputElement>);
+  };
+
+  // Handler saat Tanggal Akad berubah
+  const handleAkadDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    onChange(e);
+
+    if (sameAsAkadDate) {
+      onChange({
+        target: { name: "tanggalResepsi", value: val },
+      } as unknown as React.ChangeEvent<HTMLInputElement>);
+    }
+  };
+
+  // Handler toggle samakan tanggal
+  const handleSameAsAkadDateToggle = (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const isChecked = e.target.checked;
+    setSameAsAkadDate(isChecked);
+
+    if (isChecked) {
+      onChange({
+        target: { name: "tanggalResepsi", value: formData.tanggalAkad },
+      } as unknown as React.ChangeEvent<HTMLInputElement>);
+    }
   };
 
   return (
     <div className="space-y-6">
+      {/* 0. PILIHAN TEMPLATE UNDANGAN (DROPDOWN DINAMIS CLOUDFLARE D1) */}
+      <div>
+        <label className="block text-xs font-medium text-slate-300">
+          0. Pilih Tema / Template Undangan
+        </label>
+        <select
+          name="templateId"
+          value={formData.templateId ? String(formData.templateId) : ""}
+          onChange={onChange}
+          required
+          className="mt-1 w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 focus:border-blue-500 focus:outline-none"
+        >
+          <option value="" disabled>
+            -- Pilih Tema Undangan --
+          </option>
+
+          {rawList && rawList.length > 0 ? (
+            rawList.map((tpl: TemplateItem) => {
+              const tplVal = String(tpl.id || tpl.slug || "");
+              const tplLabel =
+                tpl.nama_template || tpl.nama || tpl.name || `Template ${tpl.id}`;
+              const tplDesc = tpl.deskripsi || tpl.description || "";
+
+              return (
+                <option key={tplVal} value={tplVal}>
+                  {tplLabel} {tplDesc ? `(${tplDesc})` : ""}
+                </option>
+              );
+            })
+          ) : (
+            <option value="" disabled>
+              (Data template kosong / tidak ditemukan)
+            </option>
+          )}
+        </select>
+      </div>
+
       {/* 1. SLUG URL */}
       <div>
         <label className="block text-xs font-medium text-slate-300">
@@ -205,7 +311,6 @@ export default function BasicFields({ formData, onChange }: BasicFieldsProps) {
         </h4>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {/* DatePicker Tanggal Akad */}
           <div>
             <label className="block text-xs font-medium text-slate-300">
               10. Tanggal Akad
@@ -214,13 +319,12 @@ export default function BasicFields({ formData, onChange }: BasicFieldsProps) {
               type="date"
               name="tanggalAkad"
               value={formData.tanggalAkad}
-              onChange={onChange}
+              onChange={handleAkadDateChange}
               required
               className="mt-1 w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 focus:border-blue-500 focus:outline-none [color-scheme:dark]"
             />
           </div>
 
-          {/* TimePicker & Zona Waktu Akad */}
           <div>
             <div className="flex items-center justify-between mb-1">
               <label className="block text-xs font-medium text-slate-300">
@@ -230,7 +334,14 @@ export default function BasicFields({ formData, onChange }: BasicFieldsProps) {
                 <input
                   type="checkbox"
                   checked={akadSelesai}
-                  onChange={(e) => updateWaktuAkad(akadStart, akadEnd, e.target.checked, akadTz)}
+                  onChange={(e) =>
+                    updateWaktuAkad(
+                      akadStart,
+                      akadEnd,
+                      e.target.checked,
+                      akadTz
+                    )
+                  }
                   className="rounded border-slate-800 bg-slate-950 text-blue-600 focus:ring-0"
                 />
                 s/d Selesai
@@ -241,7 +352,14 @@ export default function BasicFields({ formData, onChange }: BasicFieldsProps) {
               <input
                 type="time"
                 value={akadStart}
-                onChange={(e) => updateWaktuAkad(e.target.value, akadEnd, akadSelesai, akadTz)}
+                onChange={(e) =>
+                  updateWaktuAkad(
+                    e.target.value,
+                    akadEnd,
+                    akadSelesai,
+                    akadTz
+                  )
+                }
                 required
                 className="w-full rounded-lg border border-slate-800 bg-slate-950 px-2.5 py-2 text-sm text-slate-200 focus:border-blue-500 focus:outline-none [color-scheme:dark]"
               />
@@ -252,17 +370,30 @@ export default function BasicFields({ formData, onChange }: BasicFieldsProps) {
                   <input
                     type="time"
                     value={akadEnd}
-                    onChange={(e) => updateWaktuAkad(akadStart, e.target.value, akadSelesai, akadTz)}
+                    onChange={(e) =>
+                      updateWaktuAkad(
+                        akadStart,
+                        e.target.value,
+                        akadSelesai,
+                        akadTz
+                      )
+                    }
                     required
                     className="w-full rounded-lg border border-slate-800 bg-slate-950 px-2.5 py-2 text-sm text-slate-200 focus:border-blue-500 focus:outline-none [color-scheme:dark]"
                   />
                 </>
               )}
 
-              {/* Zona Waktu Dropdown */}
               <select
                 value={akadTz}
-                onChange={(e) => updateWaktuAkad(akadStart, akadEnd, akadSelesai, e.target.value)}
+                onChange={(e) =>
+                  updateWaktuAkad(
+                    akadStart,
+                    akadEnd,
+                    akadSelesai,
+                    e.target.value
+                  )
+                }
                 className="rounded-lg border border-slate-800 bg-slate-950 px-2 py-2 text-sm text-slate-200 focus:border-blue-500 focus:outline-none"
               >
                 <option value="WIB">WIB</option>
@@ -276,12 +407,23 @@ export default function BasicFields({ formData, onChange }: BasicFieldsProps) {
 
       {/* 12 & 13. DETAIL RESEPSI NIKAH */}
       <div className="rounded-xl border border-slate-800/80 bg-slate-950/50 p-4 space-y-4">
-        <h4 className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
-          Detail Resepsi Nikah
-        </h4>
+        <div className="flex items-center justify-between">
+          <h4 className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
+            Detail Resepsi Nikah
+          </h4>
+
+          <label className="flex items-center gap-1.5 text-[11px] text-emerald-400 cursor-pointer hover:text-emerald-300 transition">
+            <input
+              type="checkbox"
+              checked={sameAsAkadDate}
+              onChange={handleSameAsAkadDateToggle}
+              className="rounded border-slate-800 bg-slate-950 text-emerald-600 focus:ring-0"
+            />
+            Samakan tanggal dengan Akad
+          </label>
+        </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {/* DatePicker Tanggal Resepsi */}
           <div>
             <label className="block text-xs font-medium text-slate-300">
               12. Tanggal Resepsi
@@ -291,12 +433,12 @@ export default function BasicFields({ formData, onChange }: BasicFieldsProps) {
               name="tanggalResepsi"
               value={formData.tanggalResepsi}
               onChange={onChange}
+              disabled={sameAsAkadDate}
               required
-              className="mt-1 w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 focus:border-blue-500 focus:outline-none [color-scheme:dark]"
+              className="mt-1 w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 focus:border-blue-500 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed [color-scheme:dark]"
             />
           </div>
 
-          {/* TimePicker & Zona Waktu Resepsi */}
           <div>
             <div className="flex items-center justify-between mb-1">
               <label className="block text-xs font-medium text-slate-300">
@@ -306,7 +448,14 @@ export default function BasicFields({ formData, onChange }: BasicFieldsProps) {
                 <input
                   type="checkbox"
                   checked={resepsiSelesai}
-                  onChange={(e) => updateWaktuResepsi(resepsiStart, resepsiEnd, e.target.checked, resepsiTz)}
+                  onChange={(e) =>
+                    updateWaktuResepsi(
+                      resepsiStart,
+                      resepsiEnd,
+                      e.target.checked,
+                      resepsiTz
+                    )
+                  }
                   className="rounded border-slate-800 bg-slate-950 text-emerald-600 focus:ring-0"
                 />
                 s/d Selesai
@@ -317,7 +466,14 @@ export default function BasicFields({ formData, onChange }: BasicFieldsProps) {
               <input
                 type="time"
                 value={resepsiStart}
-                onChange={(e) => updateWaktuResepsi(e.target.value, resepsiEnd, resepsiSelesai, resepsiTz)}
+                onChange={(e) =>
+                  updateWaktuResepsi(
+                    e.target.value,
+                    resepsiEnd,
+                    resepsiSelesai,
+                    resepsiTz
+                  )
+                }
                 required
                 className="w-full rounded-lg border border-slate-800 bg-slate-950 px-2.5 py-2 text-sm text-slate-200 focus:border-blue-500 focus:outline-none [color-scheme:dark]"
               />
@@ -328,17 +484,30 @@ export default function BasicFields({ formData, onChange }: BasicFieldsProps) {
                   <input
                     type="time"
                     value={resepsiEnd}
-                    onChange={(e) => updateWaktuResepsi(resepsiStart, e.target.value, resepsiSelesai, resepsiTz)}
+                    onChange={(e) =>
+                      updateWaktuResepsi(
+                        resepsiStart,
+                        e.target.value,
+                        resepsiSelesai,
+                        resepsiTz
+                      )
+                    }
                     required
                     className="w-full rounded-lg border border-slate-800 bg-slate-950 px-2.5 py-2 text-sm text-slate-200 focus:border-blue-500 focus:outline-none [color-scheme:dark]"
                   />
                 </>
               )}
 
-              {/* Zona Waktu Dropdown */}
               <select
                 value={resepsiTz}
-                onChange={(e) => updateWaktuResepsi(resepsiStart, resepsiEnd, resepsiSelesai, e.target.value)}
+                onChange={(e) =>
+                  updateWaktuResepsi(
+                    resepsiStart,
+                    resepsiEnd,
+                    resepsiSelesai,
+                    e.target.value
+                  )
+                }
                 className="rounded-lg border border-slate-800 bg-slate-950 px-2 py-2 text-sm text-slate-200 focus:border-blue-500 focus:outline-none"
               >
                 <option value="WIB">WIB</option>
