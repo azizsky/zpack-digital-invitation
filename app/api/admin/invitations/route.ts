@@ -65,23 +65,17 @@ async function executeQuery(sql: string, params: any[] = []) {
   return sql.trim().toUpperCase().startsWith("SELECT") ? result.results : result;
 }
 
-// Helper untuk membersihkan seluruh folder file di Cloudflare R2 berdasarkan slug
+// Helper membersihkan folder file di R2 berdasarkan slug
 async function cleanupR2Folder(slug: string) {
   const bucketName = process.env.R2_BUCKET_NAME;
   const accountId = process.env.R2_ACCOUNT_ID;
   
-  if (!bucketName || !accountId) {
-    console.error("R2_BUCKET_NAME atau R2_ACCOUNT_ID belum diset di environment variables!");
-    return;
-  }
+  if (!bucketName || !accountId) return;
   
-  // Pastikan format prefix konsisten dengan saat upload (langsung nama slug-nya)
   const cleanSlug = slug.replace(/^\/+|\/+$/g, ""); 
-  const prefix = `${cleanSlug}/`; // <-- DIUBAH MENJADI INI (tanpa "wedding/")
+  const prefix = `${cleanSlug}/`;
 
   try {
-    console.log(`Mencari file di R2 dengan prefix: ${prefix} dalam bucket: ${bucketName}`);
-    
     const listedObjects = await r2.send(
       new ListObjectsV2Command({
         Bucket: bucketName,
@@ -97,54 +91,14 @@ async function cleanupR2Folder(slug: string) {
         },
       };
 
-      const deleteResult = await r2.send(new DeleteObjectsCommand(deleteParams));
-      console.log("Berhasil menghapus file R2:", deleteResult.Deleted);
+      await r2.send(new DeleteObjectsCommand(deleteParams));
       
       if (listedObjects.IsTruncated) {
         await cleanupR2Folder(slug);
       }
-    } else {
-      console.log(`Tidak ada file ditemukan di R2 dengan prefix: ${prefix}`);
     }
   } catch (error) {
-    console.error("Gagal total saat membersihkan folder R2:", error);
-  }
-}
-
-// Helper untuk membersihkan file di R2 yang sudah tidak ada di dalam daftar galeri aktif
-async function cleanupUnusedR2Files(slug: string, activeUrls: string[]) {
-  if (!process.env.R2_BUCKET_NAME || !process.env.R2_ACCOUNT_ID) return;
-
-  const prefix = `wedding/${slug}/`;
-  try {
-    const listedObjects = await r2.send(
-      new ListObjectsV2Command({
-        Bucket: process.env.R2_BUCKET_NAME,
-        Prefix: prefix,
-      })
-    );
-
-    if (listedObjects.Contents && listedObjects.Contents.length > 0) {
-      // Cari file di R2 yang namanya TIDAK ADA di dalam URL aktif (galeri, qris, dll)
-      const filesToDelete = listedObjects.Contents.filter((obj) => {
-        const fileKey = obj.Key!;
-        // Cek apakah URL file ini masih tercantum di salah satu activeUrls
-        const isUsed = activeUrls.some((url) => url.includes(fileKey));
-        return !isUsed; // Jika tidak dipakai, tandai untuk dihapus
-      });
-
-      if (filesToDelete.length > 0) {
-        const deleteParams = {
-          Bucket: process.env.R2_BUCKET_NAME,
-          Delete: {
-            Objects: filesToDelete.map((val) => ({ Key: val.Key })),
-          },
-        };
-        await r2.send(new DeleteObjectsCommand(deleteParams));
-      }
-    }
-  } catch (error) {
-    console.error("Gagal membersihkan file R2 yang tidak terpakai:", error);
+    console.error("Gagal membersihkan folder R2:", error);
   }
 }
 
@@ -191,7 +145,7 @@ export async function GET(request: Request) {
 }
 
 // ====================================================================
-// 2. DELETE: Hapus Undangan berdasarkan ID (Beserta File R2)
+// 2. DELETE: Hapus Undangan berdasarkan ID
 // ====================================================================
 export async function DELETE(request: Request) {
   try {
@@ -225,7 +179,7 @@ export async function DELETE(request: Request) {
 }
 
 // ====================================================================
-// 3. POST: Simpan Undangan Baru
+// 3. POST: Simpan Undangan Baru (Lengkap dengan WA & Video Prewed)
 // ====================================================================
 export async function POST(request: Request) {
   try {
@@ -253,10 +207,31 @@ export async function POST(request: Request) {
 
     const id = Date.now().toString();
 
-    const { musicOption, galeriFoto, qrisImageUrl, rekeningBank, ...basic } = content;
+    // 🎯 ESTRAKSI SELURUH FITUR ENTERPRISE
+    const {
+      musicOption,
+      customMusicUrl,
+      whatsappPengantin,
+      enableRsvp,
+      liveStreamUrl,
+      videoPrewedUrl,
+      galeriFoto,
+      loveStory,
+      qrisImageUrl,
+      rekeningBank,
+      ...basic
+    } = content;
+
+    // 💡 SUSUN XTRADATA LENGKAP
     const xtraData = JSON.stringify({
       musicOption: musicOption || "none",
+      customMusicUrl: customMusicUrl || "",
+      whatsappPengantin: whatsappPengantin || "",
+      enableRsvp: enableRsvp ?? true,
+      liveStreamUrl: liveStreamUrl || "",
+      videoPrewedUrl: videoPrewedUrl || "",
       galeriFoto: galeriFoto || [],
+      loveStory: loveStory || [],
       qrisImageUrl: qrisImageUrl || "",
       rekeningBank: rekeningBank || [],
     });
@@ -313,7 +288,7 @@ export async function POST(request: Request) {
 }
 
 // ====================================================================
-// 4. PUT: Update Undangan (Hapus Bersih Folder R2 Lama & Simpan Ulang)
+// 4. PUT: Update Undangan (Lengkap dengan WA & Video Prewed)
 // ====================================================================
 export async function PUT(request: Request) {
   try {
@@ -327,11 +302,31 @@ export async function PUT(request: Request) {
       );
     }
 
-    // Ekstraksi data konten baru
-    const { musicOption, galeriFoto, qrisImageUrl, rekeningBank, ...basic } = content;
+    // 🎯 ESTRAKSI SELURUH FITUR ENTERPRISE
+    const {
+      musicOption,
+      customMusicUrl,
+      whatsappPengantin,
+      enableRsvp,
+      liveStreamUrl,
+      videoPrewedUrl,
+      galeriFoto,
+      loveStory,
+      qrisImageUrl,
+      rekeningBank,
+      ...basic
+    } = content;
+
+    // 💡 SUSUN XTRADATA LENGKAP SAAT UPDATE
     const xtraData = JSON.stringify({
       musicOption: musicOption || "none",
+      customMusicUrl: customMusicUrl || "",
+      whatsappPengantin: whatsappPengantin || "",
+      enableRsvp: enableRsvp ?? true,
+      liveStreamUrl: liveStreamUrl || "",
+      videoPrewedUrl: videoPrewedUrl || "",
       galeriFoto: galeriFoto || [],
+      loveStory: loveStory || [],
       qrisImageUrl: qrisImageUrl || "",
       rekeningBank: rekeningBank || [],
     });

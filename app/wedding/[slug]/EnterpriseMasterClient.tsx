@@ -1,74 +1,253 @@
 "use client";
 
-import { useState, useRef } from "react";
+import React, { useState, useRef, useEffect, useMemo } from "react";
+// Import semua style Tailwind yang diisolasi di file terpisah
+import * as styles from "./EnterpriseMasterClient.module";
 
-interface Rekening {
-  bank: string;
-  norek: string;
-  atas_nama: string;
+// ==========================================
+// INTERFACES & TYPES
+// ==========================================
+export interface Invitation {
+  package?: string;
+  nama_panggilan_wanita?: string;
+  namaPanggilanWanita?: string;
+  nama_panggilan_pria?: string;
+  namaPanggilanPria?: string;
+  nama_lengkap_wanita?: string;
+  namaLengkapWanita?: string;
+  orang_tua_wanita?: string;
+  orangTuaWanita?: string;
+  nama_lengkap_pria?: string;
+  namaLengkapPria?: string;
+  orang_tua_pria?: string;
+  orangTuaPria?: string;
+  tanggal_akad?: string;
+  tanggalAkad?: string;
+  waktu_akad?: string;
+  waktuAkad?: string;
+  tanggal_resepsi?: string;
+  tanggalResepsi?: string;
+  waktu_resepsi?: string;
+  waktuResepsi?: string;
+  lokasi_teks?: string;
+  lokasiTeks?: string;
+  lokasi_maps?: string;
+  lokasiMaps?: string;
 }
 
-interface LoveStory {
+export interface Rekening {
+  bank: string;
+  norek?: string;
+  noRek?: string;
+  atas_nama?: string;
+  atasNama?: string;
+}
+
+export interface LoveStory {
   tahun_atau_tanggal: string;
   judul: string;
   cerita: string;
 }
 
-interface XtraData {
+export interface XtraData {
   musicOption?: string;
   customMusicUrl?: string;
   galeriFoto?: string[];
   qrisUrl?: string;
+  qrisImageUrl?: string;
   rekeningList?: Rekening[];
+  rekeningBank?: Rekening[];
   liveStreamUrl?: string;
   videoTeaserUrl?: string;
   loveStoryList?: LoveStory[];
+  alamatKadoFisik?: string;
 }
 
-// Helper untuk convert URL YouTube biasa jadi Iframe Embed URL
-function getYouTubeEmbedUrl(url: string) {
+interface EnterpriseMasterClientProps {
+  invitation: Invitation;
+  xtraData?: XtraData;
+}
+
+// ==========================================
+// HELPER FUNCTIONS FOR VIDEO PARSING
+// ==========================================
+function getEmbedVideoUrl(url: string | undefined): string {
   if (!url) return "";
-  const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
-  const match = url.match(regExp);
-  return match && match[2].length === 11
-    ? `https://www.youtube.com/embed/${match[2]}`
-    : url;
+
+  const ytRegExp =
+    /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=|shorts\/)|youtu\.be\/)([^"&?\/\s]{11})/;
+  const ytMatch = url.match(ytRegExp);
+  if (ytMatch && ytMatch[1]) {
+    return `https://www.youtube.com/embed/${ytMatch[1]}?autoplay=0&rel=0`;
+  }
+
+  const vimeoRegExp =
+    /(?:vimeo\.com\/(?:channels\/(?:\w+\/)?|groups\/([^\/]*)\/videos\/|album\/(\d+)\/video\/|video\/|)(\d+)|player\.vimeo\.com\/video\/(\d+))/;
+  const vimeoMatch = url.match(vimeoRegExp);
+  const vimeoId = vimeoMatch ? vimeoMatch[3] || vimeoMatch[4] : null;
+  if (vimeoId) {
+    return `https://player.vimeo.com/video/${vimeoId}?dnt=1&app_id=122963`;
+  }
+
+  return url;
 }
 
+// ==========================================
+// MAIN COMPONENT
+// ==========================================
 export default function EnterpriseMasterClient({
   invitation,
-  xtraData,
-}: {
-  invitation: any;
-  xtraData: XtraData;
-}) {
+  xtraData = {},
+}: EnterpriseMasterClientProps) {
+  if (!invitation) {
+    return (
+      <div className={styles.masterLayoutStyles.loadingWrapper}>
+        <div className={styles.masterLayoutStyles.spinner}></div>
+        <p className={styles.masterLayoutStyles.loadingText}>Memuat data undangan...</p>
+      </div>
+    );
+  }
+
   const pkg = (invitation.package || "basic").toLowerCase();
   const isBasic = pkg === "basic";
   const isEnterprise = pkg === "enterprise" || pkg === "exclusive";
 
-  // Control state
-  const [isOpen, setIsOpen] = useState(isBasic);
-  const [isPlaying, setIsPlaying] = useState(false);
+  // State Management
+  const [isOpen, setIsOpen] = useState<boolean>(isBasic);
+  const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+
+  // Countdown State
+  const [timeLeft, setTimeLeft] = useState({
+    days: 0,
+    hours: 0,
+    minutes: 0,
+    seconds: 0,
+  });
+
+  // RSVP Form State
+  // RSVP Form State
+  const [namaTamu, setNamaTamu] = useState<string>("");
+  const [jumlahOrang, setJumlahOrang] = useState<string>("1");
+  const [statusKehadiran, setStatusKehadiran] = useState<
+    "Hadir" | "Tidak Hadir" | "Ragu-ragu"
+  >("Hadir");
+  const [pesanTamu, setPesanTamu] = useState<string>("");
+  const [isSubmittingRsvp, setIsSubmittingRsvp] = useState<boolean>(false);
+  const [rsvpSuccess, setRsvpSuccess] = useState<boolean>(false);
+  
+  // TAMBAHKAN STATE INI:
+  const [rsvpError, setRsvpError] = useState<string | null>(null);
+  const [showRsvpForm, setShowRsvpForm] = useState<boolean>(false);
+
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // Penentuan sumber audio (Custom MP3 Enterprise vs Preset Premium)
-  const audioSource =
-    isEnterprise && xtraData.customMusicUrl
-      ? xtraData.customMusicUrl
-      : xtraData.musicOption && xtraData.musicOption !== "none"
-      ? `/music/${xtraData.musicOption}.mp3`
-      : null;
+  // Config domain R2 Cloudflare
+  const R2_DOMAIN =
+    process.env.NEXT_PUBLIC_R2_PUBLIC_DOMAIN ||
+    "https://pub-e68afb656e1047c18ea6018f93d09ddc.r2.dev";
 
-  // Handler Buka Undangan
+  // Formatter nama file & fallback jika terisi 'preset'
+  const formatMusicFilename = (filename: string) => {
+    if (!filename) return "le-onde.mp3";
+    let clean = filename.trim().replace(/\s+/g, "-");
+    
+    if (clean === "preset" || clean === "preset.mp3") {
+      return "le-onde.mp3";
+    }
+
+    return clean.endsWith(".mp3") ? clean : `${clean}.mp3`;
+  };
+
+  // Menentukan sumber audio
+  const audioSource = useMemo(() => {
+    if (xtraData?.customMusicUrl && xtraData.customMusicUrl.trim() !== "") {
+      return xtraData.customMusicUrl.trim();
+    }
+
+    if (
+      xtraData?.musicOption &&
+      xtraData.musicOption.trim() !== "" &&
+      xtraData.musicOption.toLowerCase() !== "none"
+    ) {
+      const option = xtraData.musicOption.trim();
+
+      if (option.startsWith("http://") || option.startsWith("https://")) {
+        return option;
+      }
+
+      const filename = formatMusicFilename(option);
+      return `${R2_DOMAIN}/preset-music/${filename}`;
+    }
+
+    return null;
+  }, [xtraData, R2_DOMAIN]);
+
+  // Fallback data rekening & QRIS dari props xtraData
+  const rekeningListActual = xtraData?.rekeningBank || xtraData?.rekeningList || [];
+  const qrisUrlActual = xtraData?.qrisImageUrl || xtraData?.qrisUrl;
+
+  // Countdown Effect
+  useEffect(() => {
+    const targetDateStr =
+      invitation.tanggal_akad ||
+      invitation.tanggalAkad ||
+      "2026-12-31T08:00:00";
+    const targetTime = new Date(targetDateStr).getTime();
+
+    const updateCountdown = () => {
+      const now = new Date().getTime();
+      const difference = targetTime - now;
+
+      if (difference > 0) {
+        setTimeLeft({
+          days: Math.floor(difference / (1000 * 60 * 60 * 24)),
+          hours: Math.floor((difference / (1000 * 60 * 60)) % 24),
+          minutes: Math.floor((difference / 1000 / 60) % 60),
+          seconds: Math.floor((difference / 1000) % 60),
+        });
+      } else {
+        setTimeLeft({ days: 0, hours: 0, minutes: 0, seconds: 0 });
+      }
+    };
+
+    updateCountdown();
+    const interval = setInterval(updateCountdown, 1000);
+
+    return () => clearInterval(interval);
+  }, [invitation]);
+
+  // Lock scroll body saat modal cover aktif
+  useEffect(() => {
+    if (!isOpen && !isBasic) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "unset";
+    }
+    return () => {
+      document.body.style.overflow = "unset";
+    };
+  }, [isOpen, isBasic]);
+
+  // Handler pemutaran audio
+  const playAudioSafe = async () => {
+    if (!audioRef.current || !audioSource) return;
+
+    try {
+      audioRef.current.load();
+      await audioRef.current.play();
+      setIsPlaying(true);
+    } catch (err) {
+      console.warn("Autoplay terhalang browser / media belum siap:", err);
+      setIsPlaying(false);
+    }
+  };
+
   const handleOpenInvitation = () => {
     setIsOpen(true);
-    if (!isBasic && audioSource && audioRef.current) {
-      audioRef.current
-        .play()
-        .then(() => setIsPlaying(true))
-        .catch((err) => console.log("Autoplay blocked:", err));
-    }
+    setTimeout(() => {
+      playAudioSafe();
+    }, 150);
   };
 
   const toggleMusic = () => {
@@ -77,340 +256,549 @@ export default function EnterpriseMasterClient({
       audioRef.current.pause();
       setIsPlaying(false);
     } else {
-      audioRef.current.play();
-      setIsPlaying(true);
+      playAudioSafe();
     }
   };
 
   const copyToClipboard = (text: string, index: number) => {
-    navigator.clipboard.writeText(text);
-    setCopiedIndex(index);
-    setTimeout(() => setCopiedIndex(null), 2000);
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text);
+      setCopiedIndex(index);
+      setTimeout(() => setCopiedIndex(null), 2000);
+    }
+  };
+
+ const handleRsvpSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!namaTamu.trim()) return;
+
+    setIsSubmittingRsvp(true);
+    setRsvpError(null);
+
+    // Ambil ID Undangan (Cek dari invitation.id atau invitation_id)
+    const activeInvitationId = (invitation as any)?.id || (invitation as any)?.invitation_id || "default-id";
+
+    // Ambil Nomor WA Pengantin dari xtraData
+    const targetNoHp = (xtraData as any)?.noHpPengantin || (xtraData as any)?.noHp || (xtraData as any)?.whatsappPengantin || "";
+
+    try {
+      const response = await fetch("/api/rsvp", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          invitationId: activeInvitationId, // Sesuai dengan body API
+          nama: namaTamu,
+          kehadiran: statusKehadiran,
+          pesan: pesanTamu,
+          noHpPengantin: targetNoHp, // Dikirim ke Fonnte
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || "Gagal menyimpan konfirmasi.");
+      }
+
+      setRsvpSuccess(true);
+      setNamaTamu("");
+      setPesanTamu("");
+      setStatusKehadiran("Hadir");
+
+      setTimeout(() => {
+        setRsvpSuccess(false);
+        setShowRsvpForm(false);
+      }, 3000);
+    } catch (err: any) {
+      console.error("Gagal RSVP:", err);
+      setRsvpError(err.message || "Gagal mengirim data ke server.");
+    } finally {
+      setIsSubmittingRsvp(false);
+    }
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex justify-center items-center p-0 md:p-4 font-sans">
-      {/* Audio Element */}
-      {!isBasic && audioSource && (
-        <audio ref={audioRef} loop src={audioSource} />
+    <div className={styles.masterLayoutStyles.pageWrapper}>
+      {/* Background Decor Glows */}
+      <div className={styles.masterLayoutStyles.glowTop} />
+      <div className={styles.masterLayoutStyles.glowBottom} />
+
+      {/* Audio Player */}
+      {audioSource && (
+        <audio
+          key={audioSource}
+          ref={audioRef}
+          loop
+          preload="auto"
+          src={audioSource}
+          onError={(e) => {
+            console.warn("File audio belum siap atau URL tidak ditemukan:", audioSource);
+            setIsPlaying(false);
+          }}
+        />
       )}
 
-      {/* Floating Music Button */}
+      {/* Floating Music Control */}
       {!isBasic && isOpen && audioSource && (
         <button
           onClick={toggleMusic}
-          className="fixed bottom-6 right-6 z-40 bg-rose-600/80 hover:bg-rose-600 text-white p-3.5 rounded-full shadow-lg backdrop-blur-md border border-rose-400/30 transition duration-300 animate-pulse"
-          title="Toggle Music"
+          aria-label={isPlaying ? "Jeda Musik" : "Putar Musik"}
+          className={styles.masterLayoutStyles.musicFloatingBtn}
+          title="Atur Musik"
         >
-          {isPlaying ? "🎵" : "🔇"}
+          {isPlaying ? (
+            <span className="animate-pulse block text-base">🎵</span>
+          ) : (
+            <span className="opacity-60 block text-base">🔇</span>
+          )}
         </button>
       )}
 
-      {/* Main Card View (Mobile-First Layout) */}
-      <div className="w-full max-w-md min-h-screen md:min-h-[840px] bg-slate-900 border border-slate-800 md:rounded-3xl shadow-2xl overflow-hidden flex flex-col justify-between relative">
-        
-        {/* ========================================================= */}
-        {/* POPUP COVER AWAL (PREMIUM & ENTERPRISE)                   */}
-        {/* ========================================================= */}
-        {!isOpen && !isBasic && (
-          <div className="absolute inset-0 z-50 bg-slate-950/95 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center">
-            <div className="space-y-4">
-              {isEnterprise && (
-                <span className="text-[10px] font-bold uppercase tracking-widest text-amber-400 bg-amber-400/10 px-3 py-1 rounded-full border border-amber-400/20">
-                  👑 Exclusive Invitation
-                </span>
-              )}
-              <p className="text-xs uppercase tracking-widest text-rose-400 font-semibold pt-2">
-                Walimatul 'Ursy
+      {/* ========================================================= */}
+      {/* COVER / POPUP OVERLAY                                     */}
+      {/* ========================================================= */}
+      {!isOpen && !isBasic && (
+        <div className={styles.coverOverlayStyles.overlay}>
+          <div className={styles.coverOverlayStyles.wrapper}>
+            {isEnterprise && (
+              <span className={styles.coverOverlayStyles.badge}>
+                Exclusive Invitation
+              </span>
+            )}
+            <div className={styles.coverOverlayStyles.titleContainer}>
+              <p className={styles.coverOverlayStyles.subtitle}>
+                The Wedding Of
               </p>
-              <h1 className="text-4xl font-serif text-white leading-tight">
-                {invitation.nama_panggilan_pria} <br />
-                <span className="text-rose-400 text-2xl">&</span> <br />
-                {invitation.nama_panggilan_wanita}
+              <h1 className={styles.coverOverlayStyles.mempelaiTitle}>
+                {invitation.nama_panggilan_wanita ||
+                  invitation.namaPanggilanWanita ||
+                  "Wanita"}
+                <span className={styles.coverOverlayStyles.andText}>&</span>
+                {invitation.nama_panggilan_pria ||
+                  invitation.namaPanggilanPria ||
+                  "Pria"}
               </h1>
-              <p className="text-xs text-slate-400 pt-2">
+            </div>
+
+            <div className={styles.coverOverlayStyles.guestContainer}>
+              <p className={styles.coverOverlayStyles.guestLabel}>
                 Kepada Yth. Bapak/Ibu/Saudara/i
               </p>
-
-              <button
-                onClick={handleOpenInvitation}
-                className="mt-6 px-6 py-3 bg-rose-600 hover:bg-rose-500 text-white font-medium text-sm rounded-full shadow-lg shadow-rose-600/30 transition duration-300 flex items-center gap-2 mx-auto"
-              >
-                ✉️ Buka Undangan
-              </button>
+              <p className={styles.coverOverlayStyles.guestName}>
+                Tamu Undangan
+              </p>
             </div>
+
+            <button
+              onClick={handleOpenInvitation}
+              className={styles.coverOverlayStyles.button}
+            >
+              ✉️ Buka Undangan
+            </button>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* ========================================================= */}
-        {/* KONTEN UTAMA UNDANGAN                                     */}
-        {/* ========================================================= */}
-        <div className="p-6 space-y-8 my-auto overflow-y-auto">
-          
-          {/* Header Mempelai */}
-          <div className="text-center space-y-3 pt-6">
-            <p className="text-xs uppercase tracking-widest text-rose-400 font-semibold">
-              Walimatul 'Ursy
+      {/* ========================================================= */}
+      {/* KONTEN UTAMA UNDANGAN                                     */}
+      {/* ========================================================= */}
+      <div
+        className={`${styles.masterLayoutStyles.mainContent} ${
+          isOpen ? "opacity-100 block" : "opacity-0 hidden"
+        }`}
+      >
+        {/* 1. SALAM & PEMBUKAAN */}
+        <section className={styles.headerStyles.section}>
+          <div className={styles.headerStyles.salamWrapper}>
+            <p className={styles.headerStyles.salamText}>
+              Assalamu’alaikum Wr. Wb.
             </p>
-            <h1 className="text-4xl font-serif text-white tracking-wide">
-              {invitation.nama_panggilan_pria} <span className="text-rose-400">&</span> {invitation.nama_panggilan_wanita}
-            </h1>
-            <p className="text-xs text-slate-400 px-4">
-              Tanpa mengurangi rasa hormat, kami mengundang Bapak/Ibu/Saudara/i untuk menghadiri hari bahagia kami.
+            <p className={styles.headerStyles.pembukaText}>
+              &ldquo;Dengan memohon rahmat dan ridho Allah SWT, kami bermaksud
+              menyelenggarakan pernikahan putra-putri kami:&rdquo;
             </p>
           </div>
 
-          {/* 🎥 [ENTERPRISE ONLY] VIDEO PREWEDDING / TEASER */}
-          {isEnterprise && xtraData.videoTeaserUrl && (
-            <div className="bg-slate-800/50 p-4 rounded-2xl border border-slate-700/50 space-y-3">
-              <h3 className="font-semibold text-amber-400 text-xs uppercase tracking-wider text-center">
-                🎬 Prewedding Teaser
-              </h3>
-              <div className="aspect-video rounded-xl overflow-hidden border border-slate-700">
-                <iframe
-                  src={getYouTubeEmbedUrl(xtraData.videoTeaserUrl)}
-                  className="w-full h-full"
-                  allowFullScreen
-                  title="Prewedding Video"
-                ></iframe>
-              </div>
-            </div>
-          )}
-
-          {/* Profil Lengkap & Orang Tua */}
-          <div className="bg-slate-800/50 p-5 rounded-2xl border border-slate-700/50 space-y-4 text-center">
-            <div>
-              <h2 className="text-lg font-serif font-bold text-white">
-                {invitation.nama_lengkap_pria}
-              </h2>
-              {invitation.orang_tua_pria && (
-                <p className="text-xs text-slate-400 mt-1">
-                  Putra dari Bpk/Ibu: {invitation.orang_tua_pria}
+          {/* Nama Mempelai */}
+          <div className={styles.headerStyles.mempelaiWrapper}>
+            {/* Mempelai Wanita */}
+            <div className={styles.headerStyles.mempelaiBlock}>
+              <h1 className={styles.headerStyles.namaText}>
+                {invitation.nama_lengkap_wanita ||
+                  invitation.namaLengkapWanita ||
+                  "Nama Lengkap Mempelai Wanita"}
+              </h1>
+              {(invitation.orang_tua_wanita || invitation.orangTuaWanita) && (
+                <p className={styles.headerStyles.ortuText}>
+                  Putri dari Pasangan Bpk. & Ibu{" "}
+                  <span className={styles.headerStyles.ortuSpan}>
+                    {invitation.orang_tua_wanita || invitation.orangTuaWanita}
+                  </span>
                 </p>
               )}
             </div>
 
-            <div className="text-rose-400 font-serif text-xl">&</div>
+            <div className={styles.headerStyles.divider}>&</div>
 
-            <div>
-              <h2 className="text-lg font-serif font-bold text-white">
-                {invitation.nama_lengkap_wanita}
-              </h2>
-              {invitation.orang_tua_wanita && (
-                <p className="text-xs text-slate-400 mt-1">
-                  Putri dari Bpk/Ibu: {invitation.orang_tua_wanita}
+            {/* Mempelai Pria */}
+            <div className={styles.headerStyles.mempelaiBlock}>
+              <h1 className={styles.headerStyles.namaText}>
+                {invitation.nama_lengkap_pria ||
+                  invitation.namaLengkapPria ||
+                  "Nama Lengkap Mempelai Pria"}
+              </h1>
+              {(invitation.orang_tua_pria || invitation.orangTuaPria) && (
+                <p className={styles.headerStyles.ortuText}>
+                  Putra dari Pasangan Bpk. & Ibu{" "}
+                  <span className={styles.headerStyles.ortuSpan}>
+                    {invitation.orang_tua_pria || invitation.orangTuaPria}
+                  </span>
                 </p>
               )}
             </div>
           </div>
 
-          {/* Turut Mengundang */}
-          {(invitation.turut_mengundang_pria || invitation.turut_mengundang_wanita) && (
-            <div className="text-center text-xs text-slate-400 space-y-1 bg-slate-800/30 p-3 rounded-xl border border-slate-800">
-              <p className="font-semibold text-slate-300">Turut Mengundang:</p>
-              {invitation.turut_mengundang_pria && <p>{invitation.turut_mengundang_pria}</p>}
-              {invitation.turut_mengundang_wanita && <p>{invitation.turut_mengundang_wanita}</p>}
-            </div>
-          )}
+          {/* Ayat / Kutipan */}
+          <div className={styles.headerStyles.ayatWrapper}>
+            <p className={styles.headerStyles.ayatText}>
+              &ldquo;Dan di antara tanda-tanda kekuasaan-Nya ialah Dia menciptakan
+              untukmu isteri-isteri dari jenismu sendiri, supaya kamu cenderung
+              dan merasa tenteram kepadanya, dan dijadikan-Nya diantaramu rasa
+              kasih dan sayang.&rdquo;
+            </p>
+            <p className={styles.headerStyles.surahText}>(QS. Ar-Rum: 21)</p>
+          </div>
+        </section>
 
-          {/* Rincian Acara */}
-          <div className="space-y-4">
+        {/* 2. DETAIL ACARA */}
+        <section className={styles.eventStyles.section}>
+          <h3 className={styles.eventStyles.title}>Detail Acara</h3>
+
+          <div className={styles.eventStyles.grid}>
             {/* Akad Nikah */}
-            <div className="bg-slate-800/40 p-4 rounded-xl border border-slate-700/40 space-y-1">
-              <span className="text-[10px] font-bold uppercase tracking-wider bg-rose-500/20 text-rose-300 px-2.5 py-0.5 rounded-full">
-                Akad Nikah
-              </span>
-              <p className="text-sm font-semibold text-white mt-2">
-                {invitation.tanggal_akad || "Tanggal belum diatur"}
+            <div className={styles.eventStyles.card}>
+              <span className={styles.eventStyles.label}>Akad Nikah</span>
+              <p className={styles.eventStyles.date}>
+                {invitation.tanggal_akad ||
+                  invitation.tanggalAkad ||
+                  "Senin, 01 Januari 2026"}
               </p>
-              <p className="text-xs text-slate-400">
-                Pukul: {invitation.waktu_akad || "08.00 WIB s/d Selesai"}
+              <p className={styles.eventStyles.time}>
+                Pukul:{" "}
+                {invitation.waktu_akad ||
+                  invitation.waktuAkad ||
+                  "08.00 WIB s/d Selesai"}
               </p>
             </div>
 
-            {/* Resepsi Nikah */}
-            <div className="bg-slate-800/40 p-4 rounded-xl border border-slate-700/40 space-y-1">
-              <span className="text-[10px] font-bold uppercase tracking-wider bg-rose-500/20 text-rose-300 px-2.5 py-0.5 rounded-full">
-                Resepsi Nikah
-              </span>
-              <p className="text-sm font-semibold text-white mt-2">
-                {invitation.tanggal_resepsi || invitation.tanggal_akad}
+            {/* Resepsi */}
+            <div className={styles.eventStyles.card}>
+              <span className={styles.eventStyles.label}>Resepsi</span>
+              <p className={styles.eventStyles.date}>
+                {invitation.tanggal_resepsi ||
+                  invitation.tanggalResepsi ||
+                  invitation.tanggal_akad ||
+                  invitation.tanggalAkad ||
+                  "Senin, 01 Januari 2026"}
               </p>
-              <p className="text-xs text-slate-400">
-                Pukul: {invitation.waktu_resepsi || "10.00 WIB s/d Selesai"}
+              <p className={styles.eventStyles.time}>
+                Pukul:{" "}
+                {invitation.waktu_resepsi ||
+                  invitation.waktuResepsi ||
+                  "11.00 WIB s/d Selesai"}
               </p>
             </div>
           </div>
+        </section>
 
-          {/* 🎥 [ENTERPRISE ONLY] LIVE STREAMING */}
-          {isEnterprise && xtraData.liveStreamUrl && (
-            <div className="bg-amber-500/10 p-5 rounded-2xl border border-amber-500/30 space-y-3 text-center">
-              <span className="text-[10px] font-bold uppercase tracking-wider bg-amber-500/20 text-amber-300 px-3 py-1 rounded-full">
-                📡 Live Streaming Acara
-              </span>
-              <p className="text-xs text-slate-300 pt-1">
-                Bagi tamu yang tidak dapat hadir secara langsung, Anda dapat menyaksikan prosesi acara melalui tayangan siaran langsung di bawah ini:
-              </p>
-              
-              {xtraData.liveStreamUrl.includes("youtube") || xtraData.liveStreamUrl.includes("youtu.be") ? (
-                <div className="aspect-video rounded-xl overflow-hidden border border-amber-500/20 mt-2">
-                  <iframe
-                    src={getYouTubeEmbedUrl(xtraData.liveStreamUrl)}
-                    className="w-full h-full"
-                    allowFullScreen
-                    title="Live Stream"
-                  ></iframe>
-                </div>
-              ) : (
-                <a
-                  href={xtraData.liveStreamUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="mt-2 inline-block px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-semibold text-xs rounded-xl shadow-md transition"
-                >
-                  🔗 Klik Untuk Bergabung Siaran Langsung (Zoom/Meet)
-                </a>
-              )}
-            </div>
-          )}
+        {/* 3. COUNTDOWN */}
+        <section className={styles.countdownStyles.section}>
+          <p className={styles.countdownStyles.title}>
+            Hitung Mundur Hari Bahagia
+          </p>
+          <div className={styles.countdownStyles.grid}>
+            {[
+              { label: "Hari", value: timeLeft.days },
+              { label: "Jam", value: timeLeft.hours },
+              { label: "Menit", value: timeLeft.minutes },
+              { label: "Detik", value: timeLeft.seconds },
+            ].map((item, idx) => (
+              <div key={idx} className={styles.countdownStyles.item}>
+                <span className={styles.countdownStyles.number}>
+                  {String(item.value).padStart(2, "0")}
+                </span>
+                <span className={styles.countdownStyles.unit}>
+                  {item.label}
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
 
-          {/* Lokasi & Maps */}
-          <div className="bg-slate-800/50 p-5 rounded-2xl border border-slate-700/50 space-y-3">
-            <h3 className="font-semibold text-rose-400 text-sm flex items-center gap-1.5">
-              📍 Lokasi Acara
-            </h3>
-            <p className="text-xs text-slate-300 leading-relaxed">
-              {invitation.lokasi_teks || "Lokasi belum diatur"}
-            </p>
+        {/* 4. GOOGLE MAPS / LOKASI */}
+        <section className={styles.locationStyles.section}>
+          <h3 className={styles.locationStyles.title}>Lokasi Acara</h3>
+          <p className={styles.locationStyles.address}>
+            {invitation.lokasi_teks ||
+              invitation.lokasiTeks ||
+              "Gedung Pernikahan Indah, Jl. Contoh Alamat No. 123, Kota Bandung"}
+          </p>
 
-            {invitation.lokasi_maps && (
-              <div className="pt-2 rounded-xl overflow-hidden">
+          {(invitation.lokasi_maps || invitation.lokasiMaps) && (
+            <div className={styles.locationStyles.wrapper}>
+              <div className={styles.locationStyles.mapContainer}>
                 <iframe
-                  src={invitation.lokasi_maps}
+                  src={invitation.lokasi_maps || invitation.lokasiMaps}
                   width="100%"
-                  height="180"
+                  height="260"
                   style={{ border: 0 }}
                   allowFullScreen
                   loading="lazy"
-                  className="rounded-lg"
+                  title="Lokasi Acara"
+                  className={styles.locationStyles.iframe}
                 ></iframe>
               </div>
-            )}
-          </div>
 
-          {/* 📖 [ENTERPRISE ONLY] LOVE STORY / TIMELINE KISAH CINTA */}
-          {isEnterprise && xtraData.loveStoryList && xtraData.loveStoryList.length > 0 && (
-            <div className="bg-slate-800/50 p-5 rounded-2xl border border-slate-700/50 space-y-4">
-              <h3 className="font-semibold text-amber-400 text-sm text-center">
-                📖 Love Story (Kisah Cinta Kami)
-              </h3>
-              
-              <div className="relative border-l-2 border-amber-500/40 ml-3 space-y-6 pl-4 pt-2">
+              <a
+                href={invitation.lokasi_maps || invitation.lokasiMaps}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={styles.locationStyles.button}
+              >
+                📍 Buka Google Maps
+              </a>
+            </div>
+          )}
+        </section>
+
+        {/* 5. LOVE STORY (Opsional) */}
+        {isEnterprise &&
+          xtraData?.loveStoryList &&
+          xtraData.loveStoryList.length > 0 && (
+            <section className={styles.loveStoryStyles.section}>
+              <h3 className={styles.loveStoryStyles.title}>Love Story</h3>
+
+              <div className={styles.loveStoryStyles.timelineContainer}>
                 {xtraData.loveStoryList.map((story, idx) => (
-                  <div key={idx} className="relative">
-                    {/* Bullet Marker */}
-                    <div className="absolute -left-[23px] top-1 w-3 h-3 bg-amber-400 rounded-full border-2 border-slate-900 shadow-sm" />
-                    
-                    <span className="text-[10px] font-bold text-amber-300 bg-amber-400/10 px-2 py-0.5 rounded border border-amber-400/20">
+                  <div key={idx} className={styles.loveStoryStyles.item}>
+                    <div className={styles.loveStoryStyles.dot} />
+                    <span className={styles.loveStoryStyles.year}>
                       {story.tahun_atau_tanggal}
                     </span>
-                    <h4 className="text-xs font-bold text-white mt-1">
+                    <h4 className={styles.loveStoryStyles.heading}>
                       {story.judul}
                     </h4>
-                    <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                    <p className={styles.loveStoryStyles.story}>
                       {story.cerita}
                     </p>
                   </div>
                 ))}
               </div>
-            </div>
+            </section>
           )}
 
-          {/* 📸 GALERI FOTO (PREMIUM MAX 10, ENTERPRISE MAX 20) */}
-          {!isBasic && xtraData.galeriFoto && xtraData.galeriFoto.length > 0 && (
-            <div className="bg-slate-800/50 p-5 rounded-2xl border border-slate-700/50 space-y-4">
-              <h3 className="font-semibold text-rose-400 text-sm text-center">
-                📸 Galeri Momen Bahagia
-              </h3>
-              <div className="grid grid-cols-2 gap-2">
-                {xtraData.galeriFoto.map((imgUrl, idx) => (
-                  <div
-                    key={idx}
-                    className="aspect-square bg-slate-900 rounded-lg overflow-hidden border border-slate-700/40"
-                  >
-                    <img
-                      src={imgUrl}
-                      alt={`Galeri ${idx + 1}`}
-                      className="w-full h-full object-cover hover:scale-105 transition duration-300"
-                    />
-                  </div>
-                ))}
-              </div>
+        {/* 6. GALERI FOTO */}
+        {!isBasic && xtraData?.galeriFoto && xtraData.galeriFoto.length > 0 && (
+          <section className={styles.galleryStyles.section}>
+            <h3 className={styles.galleryStyles.title}>Galeri Foto</h3>
+            <div className={styles.galleryStyles.grid}>
+              {xtraData.galeriFoto.map((imgUrl, idx) => (
+                <div key={idx} className={styles.galleryStyles.imageCard}>
+                  <img
+                    src={imgUrl}
+                    alt={`Galeri foto ${idx + 1}`}
+                    className={styles.galleryStyles.image}
+                  />
+                </div>
+              ))}
             </div>
-          )}
+          </section>
+        )}
 
-          {/* 💳 KADO DIGITAL & AMPLOP */}
-          {!isBasic && (((xtraData.rekeningList && xtraData.rekeningList.length > 0) || xtraData.qrisUrl)) && (
-            <div className="bg-slate-800/50 p-5 rounded-2xl border border-slate-700/50 space-y-5 text-center">
-              <h3 className="font-semibold text-rose-400 text-sm">
-                💳 Kado Digital & Amplop
-              </h3>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Doa restu Anda merupakan karunia terindah bagi kami. Bagi yang ingin memberikan tanda kasih, dapat melalui nomor rekening / QRIS berikut:
+        {/* Video Teaser (Opsional) */}
+        {isEnterprise && xtraData?.videoTeaserUrl && (
+          <section className="space-y-6 text-center">
+            <h3 className={styles.galleryStyles.title}>Video Prewedding</h3>
+            <div className={styles.galleryStyles.videoContainer}>
+              <iframe
+                src={getEmbedVideoUrl(xtraData.videoTeaserUrl)}
+                className={styles.galleryStyles.iframe}
+                allow="autoplay; fullscreen; picture-in-picture"
+                allowFullScreen
+                title="Prewedding Video"
+              ></iframe>
+            </div>
+          </section>
+        )}
+
+        {/* 7. WEDDING GIFT */}
+        {rekeningListActual.length > 0 && (
+          <section className={styles.giftStyles.section}>
+            <div className={styles.giftStyles.headerWrapper}>
+              <h3 className={styles.giftStyles.title}>Wedding Gift</h3>
+              <p className={styles.giftStyles.description}>
+                Doa restu Anda merupakan karunia terindah bagi kami. Namun jika
+                ingin memberi hadiah, Anda dapat menggunakan opsi berikut:
               </p>
+            </div>
+
+            <div className={styles.giftStyles.container}>
+              {/* Rekening Bank & E-Wallet */}
+              {rekeningListActual.map((rek, idx) => {
+                const nomorRekening = rek.norek || rek.noRek || "";
+                const atasNama = rek.atas_nama || rek.atasNama || "";
+
+                return (
+                  <div key={idx} className={styles.giftStyles.bankCard}>
+                    <p className={styles.giftStyles.bankName}>{rek.bank}</p>
+                    <p className={styles.giftStyles.accountNum}>
+                      {nomorRekening}
+                    </p>
+                    <p className={styles.giftStyles.accountOwner}>
+                      a.n {atasNama}
+                    </p>
+                    <button
+                      onClick={() => copyToClipboard(nomorRekening, idx)}
+                      className={styles.giftStyles.copyButton}
+                    >
+                      {copiedIndex === idx ? "✓ Tersalin" : "📋 Salin Rekening"}
+                    </button>
+                  </div>
+                );
+              })}
 
               {/* QRIS */}
-              {xtraData.qrisUrl && (
-                <div className="p-3 bg-white/5 rounded-xl border border-slate-700 inline-block">
+              {qrisUrlActual && (
+                <div className={styles.giftStyles.qrisWrapper}>
+                  <p className={styles.giftStyles.qrisLabel}>QRIS Pembayaran</p>
                   <img
-                    src={xtraData.qrisUrl}
-                    alt="QRIS Pembayaran"
-                    className="w-44 h-44 object-contain mx-auto rounded-lg"
+                    src={qrisUrlActual}
+                    alt="QRIS Gift"
+                    className={styles.giftStyles.qrisImage}
                   />
-                  <p className="text-[10px] text-slate-400 mt-2">Scan QRIS All Payment</p>
                 </div>
               )}
 
-              {/* Rekening Bank */}
-              {xtraData.rekeningList && xtraData.rekeningList.length > 0 && (
-                <div className="space-y-3 pt-2">
-                  {xtraData.rekeningList.map((rek, idx) => (
-                    <div
-                      key={idx}
-                      className="bg-slate-900/80 p-4 rounded-xl border border-slate-700/60 text-left space-y-2 relative"
-                    >
-                      <span className="text-xs font-bold text-rose-400 uppercase tracking-wide">
-                        {rek.bank}
-                      </span>
-                      <p className="text-sm font-mono font-semibold text-white tracking-wider">
-                        {rek.norek}
-                      </p>
-                      <p className="text-xs text-slate-400">
-                        a.n. {rek.atas_nama}
-                      </p>
-
-                      <button
-                        onClick={() => copyToClipboard(rek.norek, idx)}
-                        className="mt-2 w-full py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-lg border border-slate-600 transition"
-                      >
-                        {copiedIndex === idx ? "✅ Tersalin!" : "📋 Salin No. Rekening"}
-                      </button>
-                    </div>
-                  ))}
+              {/* Alamat Kado Fisik */}
+              {xtraData?.alamatKadoFisik && (
+                <div className={styles.giftStyles.addressCard}>
+                  <p className={styles.giftStyles.addressLabel}>
+                    Alamat Pengiriman Kado Fisik
+                  </p>
+                  <p className={styles.giftStyles.addressText}>
+                    {xtraData.alamatKadoFisik}
+                  </p>
                 </div>
               )}
             </div>
-          )}
+          </section>
+        )}
 
-        </div>
+        {/* 8. RSVP */}
+        {isEnterprise && (
+          <section className={styles.rsvpStyles.section}>
+            <div className={styles.rsvpStyles.headerWrapper}>
+              <h3 className={styles.rsvpStyles.title}>
+                Konfirmasi Kehadiran (RSVP)
+              </h3>
+              <p className={styles.rsvpStyles.description}>
+                Mohon konfirmasikan kehadiran Anda untuk membantu persiapan acara.
+              </p>
+            </div>
 
-        {/* Footer */}
-        <div className="text-center py-4 bg-slate-950/50 border-t border-slate-800/60">
-          <p className="text-[10px] text-slate-500">
-            Powered by <strong className="text-slate-400">Zpack Digital Invitation</strong>
+            <form onSubmit={handleRsvpSubmit} className={styles.rsvpStyles.form}>
+              <div>
+                <label className={styles.rsvpStyles.label}>
+                  Nama Tamu / Rombongan
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={namaTamu}
+                  onChange={(e) => setNamaTamu(e.target.value)}
+                  placeholder="Masukkan nama Anda"
+                  className={styles.rsvpStyles.input}
+                />
+              </div>
+
+              <div className={styles.rsvpStyles.gridTwoCol}>
+                <div>
+                  <label className={styles.rsvpStyles.label}>
+                    Jumlah Orang
+                  </label>
+                  <select
+                    value={jumlahOrang}
+                    onChange={(e) => setJumlahOrang(e.target.value)}
+                    className={styles.rsvpStyles.select}
+                  >
+                    <option value="1">1 Orang</option>
+                    <option value="2">2 Orang</option>
+                    <option value="3">3 Orang</option>
+                    <option value="4+">Lebih dari 3</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className={styles.rsvpStyles.label}>
+                    Konfirmasi Kehadiran
+                  </label>
+                  <select
+                    value={statusKehadiran}
+                    onChange={(e) =>
+                      setStatusKehadiran(
+                        e.target.value as "Hadir" | "Tidak Hadir" | "Ragu-ragu"
+                      )
+                    }
+                    className={styles.rsvpStyles.select}
+                  >
+                    <option value="Hadir">Hadir</option>
+                    <option value="Tidak Hadir">Tidak Hadir</option>
+                    <option value="Ragu-ragu">Ragu-ragu</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className={styles.rsvpStyles.label}>
+                  Pesan / Ucapan Singkat (Opsional)
+                </label>
+                <textarea
+                  rows={2}
+                  value={pesanTamu}
+                  onChange={(e) => setPesanTamu(e.target.value)}
+                  placeholder="Tulis ucapan selamat..."
+                  className={styles.rsvpStyles.textarea}
+                ></textarea>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isSubmittingRsvp}
+                className={styles.rsvpStyles.button}
+              >
+                {isSubmittingRsvp ? "Mengirim..." : "Kirim Konfirmasi"}
+              </button>
+
+              {rsvpSuccess && (
+                <p className={styles.rsvpStyles.successText}>
+                  ✓ Terima kasih! Konfirmasi Anda telah berhasil dikirim.
+                </p>
+              )}
+            </form>
+          </section>
+        )}
+
+        {/* 9. FOOTER */}
+        <footer className="text-center space-y-4 pt-12 border-t border-slate-900 text-slate-500">
+          <p className="text-xs">
+            Merupakan suatu kehormatan dan kebahagiaan bagi kami apabila Bapak/Ibu/Saudara/i berkenan hadir.
           </p>
-        </div>
-
+          <p className="text-[10px] uppercase tracking-widest">
+            © {new Date().getFullYear()} Zpack Digital Wedding Invitation
+          </p>
+        </footer>
       </div>
     </div>
   );

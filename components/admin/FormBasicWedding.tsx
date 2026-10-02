@@ -32,7 +32,7 @@ export default function FormBasicWedding({
     lokasiMaps: "",
   });
 
-  const [templates, setTemplates] = useState([]);
+  const [templates, setTemplates] = useState<any[]>([]);
 
   useEffect(() => {
     async function fetchTemplates() {

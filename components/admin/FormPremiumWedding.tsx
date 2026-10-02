@@ -6,13 +6,16 @@ import { PremiumWeddingContent, RekeningBank } from "@/types/wedding";
 
 interface FormPremiumWeddingProps {
   onSubmit: (data: PremiumWeddingContent) => void;
-  initialData?: Partial<PremiumWeddingContent>; // Ditambahkan untuk mendukung mode Edit
+  initialData?: Partial<PremiumWeddingContent>;
 }
 
 export default function FormPremiumWedding({ onSubmit, initialData }: FormPremiumWeddingProps) {
+  // 1. Inisialisasi State Lengkap (Termasuk noWhatsapp & enableRsvp)
   const [formData, setFormData] = useState<PremiumWeddingContent>({
     templateId: "theme-minimalist",
     slug: "",
+    noWhatsapp: "",
+    enableRsvp: true,
     namaPanggilanPria: "",
     namaPanggilanWanita: "",
     namaLengkapPria: "",
@@ -27,14 +30,20 @@ export default function FormPremiumWedding({ onSubmit, initialData }: FormPremiu
     waktuResepsi: "11.00 - 14.00 WIB",
     lokasiTeks: "",
     lokasiMaps: "",
-    musicOption: "lagu-1",
+    musicOption: "none",
     galeriFoto: [],
     qrisImageUrl: "",
     rekeningBank: [{ bank: "BCA", noRek: "", atasNama: "" }],
   });
 
   // State untuk menampung data templates dari API
-  const [templates, setTemplates] = useState([]);
+ const [templates, setTemplates] = useState<any[]>([]);
+
+  // State untuk menampung list musik preset dari R2
+  const [presetMusicList, setPresetMusicList] = useState<
+    Array<{ filename: string; title: string; url: string }>
+  >([]);
+  const [isLoadingMusic, setIsLoadingMusic] = useState(true);
 
   // State lokal untuk file QRIS baru
   const [qrisFile, setQrisFile] = useState<File | null>(null);
@@ -46,7 +55,7 @@ export default function FormPremiumWedding({ onSubmit, initialData }: FormPremiu
 
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Fetch daftar template saat komponen di-mount
+  // 1. Fetch daftar template dari API saat komponen di-mount
   useEffect(() => {
     async function fetchTemplates() {
       try {
@@ -58,7 +67,6 @@ export default function FormPremiumWedding({ onSubmit, initialData }: FormPremiu
         }
 
         const json = await res.json();
-        console.log("📦 [FORM_PREMIUM] Response from API:", json);
 
         if (json.success && Array.isArray(json.data)) {
           setTemplates(json.data);
@@ -75,18 +83,38 @@ export default function FormPremiumWedding({ onSubmit, initialData }: FormPremiu
     fetchTemplates();
   }, []);
 
-  // Sinkronisasi data saat tombol Edit diklik (Load data lama)
+  // 2. Fetch daftar lagu preset dari R2 (folder preset-music/) saat komponen di-mount
+  useEffect(() => {
+    async function fetchPresetMusic() {
+      try {
+        setIsLoadingMusic(true);
+        const res = await fetch("/api/admin/preset-music");
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          setPresetMusicList(json.data);
+        }
+      } catch (err) {
+        console.error("❌ [FORM_PREMIUM] Gagal mengambil daftar musik preset dari R2:", err);
+      } finally {
+        setIsLoadingMusic(false);
+      }
+    }
+
+    fetchPresetMusic();
+  }, []);
+
+  // 3. Sinkronisasi data saat mode Edit aktif
   useEffect(() => {
     if (initialData) {
       setFormData((prev) => ({
         ...prev,
         ...initialData,
+        enableRsvp: initialData.enableRsvp ?? true,
+        noWhatsapp: initialData.noWhatsapp || "",
       }));
-      // Jika ada URL QRIS lama, tampilkan di preview
       if (initialData.qrisImageUrl) {
         setQrisPreview(initialData.qrisImageUrl);
       }
-      // Jika ada galeri lama, tampilkan di preview galeri
       if (initialData.galeriFoto && Array.isArray(initialData.galeriFoto)) {
         setGaleriPreviews(initialData.galeriFoto);
       }
@@ -107,7 +135,7 @@ export default function FormPremiumWedding({ onSubmit, initialData }: FormPremiu
 
     setQrisFile(file);
     setQrisPreview(URL.createObjectURL(file));
-    e.target.value = ""; 
+    e.target.value = "";
   };
 
   const removeQris = () => {
@@ -121,7 +149,6 @@ export default function FormPremiumWedding({ onSubmit, initialData }: FormPremiu
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
 
-    // Hitung total gabungan galeri lama (di formData) dan file baru
     const totalCurrent = (formData.galeriFoto?.length || 0) + galeriFiles.length + files.length;
     if (totalCurrent > 10) {
       alert("⚠️ Maksimal total foto galeri adalah 10 foto!");
@@ -133,22 +160,20 @@ export default function FormPremiumWedding({ onSubmit, initialData }: FormPremiu
 
     setGaleriFiles((prev) => [...prev, ...files]);
     setGaleriPreviews((prev) => [...prev, ...newPreviews]);
-    e.target.value = ""; 
+    e.target.value = "";
   };
 
-  
   const removeGaleriItem = async (index: number) => {
     const urlToRemove = galeriPreviews[index];
 
-    // Cek apakah URL tersebut adalah file yang sudah tersimpan di R2
-    if (formData.galeriFoto.includes(urlToRemove)) {
+    if (formData.galeriFoto && formData.galeriFoto.includes(urlToRemove)) {
       try {
         const response = await fetch("/api/admin/delete", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ fileUrl: urlToRemove }),
         });
-        
+
         const result = await response.json();
         if (!result.success) {
           console.error("Gagal menghapus file dari R2:", result.message);
@@ -159,18 +184,15 @@ export default function FormPremiumWedding({ onSubmit, initialData }: FormPremiu
         return;
       }
 
-      // Update state formData agar foto terhapus dari list database
       setFormData((prev) => ({
         ...prev,
         galeriFoto: prev.galeriFoto.filter((url) => url !== urlToRemove),
       }));
     }
 
-    // Hapus dari preview tampilan layar
     setGaleriPreviews((prev) => prev.filter((_, i) => i !== index));
-    
-    // Hapus dari antrean file lokal jika belum sempat di-upload
-    const fileIndex = index - formData.galeriFoto.length;
+
+    const fileIndex = index - (formData.galeriFoto?.length || 0);
     if (fileIndex >= 0) {
       setGaleriFiles((prev) => prev.filter((_, i) => i !== fileIndex));
     }
@@ -188,20 +210,9 @@ export default function FormPremiumWedding({ onSubmit, initialData }: FormPremiu
     setIsSubmitting(true);
 
     try {
-      // 🧹 A. PANGGIL API UNTUK BERSIHKAN FOLDER LAMA DI R2
-      if (initialData) {
-        await fetch("/api/admin/upload", {
-          method: "DELETE",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ slug: formData.slug }),
-        }).catch(() => {
-          // Lanjutkan proses jika endpoint delete belum ada
-        });
-      }
-
       let finalQrisUrl = formData.qrisImageUrl;
 
-      // B. Upload QRIS baru jika user memilih file baru
+      // Upload QRIS jika ada file baru yang dipilih
       if (qrisFile) {
         const qrisData = new FormData();
         qrisData.append("file", qrisFile);
@@ -210,14 +221,14 @@ export default function FormPremiumWedding({ onSubmit, initialData }: FormPremiu
 
         const res = await fetch("/api/admin/upload", { method: "POST", body: qrisData });
         const json = await res.json();
-        
+
         if (!res.ok || !json.success) {
           throw new Error(json.message || "Gagal upload QRIS ke Cloudflare R2.");
         }
         finalQrisUrl = json.url;
       }
 
-      // C. Upload Foto Galeri Baru
+      // Upload Galeri Foto baru jika ada
       const uploadedGalleryUrls: string[] = [];
       for (const file of galeriFiles) {
         const galeriData = new FormData();
@@ -234,7 +245,6 @@ export default function FormPremiumWedding({ onSubmit, initialData }: FormPremiu
         uploadedGalleryUrls.push(json.url);
       }
 
-      // D. Gabungkan data
       const finalPayload: PremiumWeddingContent = {
         ...formData,
         qrisImageUrl: finalQrisUrl,
@@ -244,7 +254,7 @@ export default function FormPremiumWedding({ onSubmit, initialData }: FormPremiu
       onSubmit(finalPayload);
     } catch (err: any) {
       alert("⚠️ " + err.message);
-    } finally { // <--- DI SINI SUDAH DIPERBAIKI DARI 'fontally' KE 'finally'
+    } finally {
       setIsSubmitting(false);
     }
   };
@@ -280,30 +290,81 @@ export default function FormPremiumWedding({ onSubmit, initialData }: FormPremiu
           </h3>
         </div>
         <p className="text-xs text-slate-400">
-          {initialData ? "Perbarui detail data dan kelola media foto di bawah ini." : "Lengkapi data, pilih foto galeri sekaligus, dan pastikan konfigurasi R2 di .env.local sudah benar."}
+          {initialData
+            ? "Perbarui detail data dan kelola media foto di bawah ini."
+            : "Lengkapi data, pilih foto galeri sekaligus, dan pastikan konfigurasi R2 di .env.local sudah benar."}
         </p>
       </div>
 
       <BasicFields formData={formData} onChange={handleChange} templates={templates} />
 
-      {/* Musik Background */}
+      {/* Musik Background (Membaca Otomatis dari R2 folder preset-music/) */}
       <div className="rounded-xl border border-emerald-500/35 bg-emerald-950/10 p-4 space-y-3">
         <h4 className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
-          🎵 Pilihan Musik Background
+          🎵 PILIHAN MUSIK BACKGROUND
         </h4>
         <select
           name="musicOption"
-          value={formData.musicOption}
+          value={formData.musicOption || "none"}
           onChange={handleChange}
           className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none"
         >
-          <option value="none">Tanpa Musik (None)</option>
-          <option value="lagu-1">Lagu 1 - Instrument Romance</option>
-          <option value="lagu-2">Lagu 2 - Acoustic Wedding</option>
-          <option value="lagu-3">Lagu 3 - Soft Piano</option>
-          <option value="lagu-4">Lagu 4 - Orchestra Love</option>
-          <option value="lagu-5">Lagu 5 - Sundanese Instrumental</option>
+          <option value="none">-- Tanpa Musik (None) --</option>
+          {isLoadingMusic ? (
+            <option value="" disabled>
+              Memuat daftar lagu dari Cloudflare R2...
+            </option>
+          ) : presetMusicList.length > 0 ? (
+            presetMusicList.map((song) => (
+              <option key={song.filename} value={song.filename}>
+                {song.title}
+              </option>
+            ))
+          ) : (
+            <option value="" disabled>
+              (Belum ada lagu preset di folder R2)
+            </option>
+          )}
         </select>
+      </div>
+
+      {/* 📱 KONFIGURASI RSVP (OPSIONAL) */}
+      <div className="rounded-xl border border-emerald-500/35 bg-emerald-950/10 p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <h4 className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
+            💌 FITUR RSVP VIA WHATSAPP (OPSIONAL)
+          </h4>
+          <label className="relative inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              checked={formData.enableRsvp ?? true}
+              onChange={(e) =>
+                setFormData((prev) => ({ ...prev, enableRsvp: e.target.checked }))
+              }
+              className="sr-only peer"
+            />
+            <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
+          </label>
+        </div>
+
+        {formData.enableRsvp && (
+          <div className="space-y-1.5 pt-1">
+            <label className="block text-xs font-medium text-slate-300">
+              Nomor WhatsApp Pengantin (Penerima RSVP)
+            </label>
+            <input
+              type="text"
+              name="noWhatsapp"
+              value={formData.noWhatsapp || ""}
+              onChange={handleChange}
+              placeholder="Contoh: 081234567890 (Kosongkan jika tidak memakai Fonnte)"
+              className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 focus:border-emerald-500 focus:outline-none"
+            />
+            <p className="text-[10px] text-slate-400">
+              Jika diisi, konfirmasi kehadiran tamu akan otomatis terkirim ke WhatsApp pengantin via Fonnte.
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Galeri Foto */}
@@ -311,7 +372,7 @@ export default function FormPremiumWedding({ onSubmit, initialData }: FormPremiu
         <div className="flex items-center justify-between">
           <div>
             <h4 className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
-              📸 Galeri Foto Prewedding ({galeriPreviews.length}/10 Foto)
+              📸 GALERI FOTO PREWEDDING ({galeriPreviews.length}/10 FOTO)
             </h4>
             <p className="text-[11px] text-slate-400">
               Kamu bisa melihat foto lama dan menghapus bagian foto yang tidak diinginkan sebelum disimpan ulang.
@@ -359,12 +420,14 @@ export default function FormPremiumWedding({ onSubmit, initialData }: FormPremiu
       {/* Kado Digital & Amplop */}
       <div className="rounded-xl border border-emerald-500/35 bg-emerald-950/10 p-4 space-y-4">
         <h4 className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
-          💳 Kado Digital & Amplop
+          💳 KADO DIGITAL & AMPLOP
         </h4>
 
         {/* QRIS */}
         <div className="space-y-2">
-          <label className="block text-xs font-medium text-slate-300">Gambar QRIS (Maksimal 1 Gambar)</label>
+          <label className="block text-xs font-medium text-slate-300">
+            Gambar QRIS (Maksimal 1 Gambar)
+          </label>
           <div className="flex items-center gap-4">
             <label className="px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer bg-blue-600 text-white hover:bg-blue-500 transition-all">
               {qrisPreview ? "Ganti QRIS" : "Pilih File QRIS"}
@@ -399,7 +462,9 @@ export default function FormPremiumWedding({ onSubmit, initialData }: FormPremiu
         {/* Rekening Bank */}
         <div className="space-y-3 pt-2">
           <div className="flex items-center justify-between">
-            <label className="block text-xs font-medium text-slate-300">Daftar Rekening Bank</label>
+            <label className="block text-xs font-medium text-slate-300">
+              Daftar Rekening Bank
+            </label>
             <button
               type="button"
               onClick={addBankSlot}
@@ -423,8 +488,9 @@ export default function FormPremiumWedding({ onSubmit, initialData }: FormPremiu
               />
               <input
                 type="text"
-                value={bankItem?.noRek || ""} 
+                value={bankItem?.noRek || ""}
                 onChange={(e) => handleBankChange(idx, "noRek", e.target.value)}
+                placeholder="Nomor Rekening"
                 className="rounded border border-slate-800 bg-slate-900 px-2.5 py-1.5 text-xs text-slate-200"
               />
               <div className="flex gap-2">
@@ -456,10 +522,10 @@ export default function FormPremiumWedding({ onSubmit, initialData }: FormPremiu
         className="w-full rounded-lg bg-emerald-600 px-5 py-3 text-xs font-bold uppercase tracking-wider text-white shadow-lg shadow-emerald-600/30 hover:bg-emerald-500 transition disabled:bg-slate-700"
       >
         {isSubmitting
-          ? "Sedang Memproses & Membersihkan R2..."
+          ? "Sedang Memproses & Mengunggah Media..."
           : initialData
-          ? "Simpan Perubahan & Perbarui Undangan Premium"
-          : "Simpan & Terbitkan Undangan Premium"}
+          ? "SIMPAN PERUBAHAN & PERBARUI UNDANGAN PREMIUM"
+          : "SIMPAN & TERBITKAN UNDANGAN PREMIUM"}
       </button>
     </form>
   );

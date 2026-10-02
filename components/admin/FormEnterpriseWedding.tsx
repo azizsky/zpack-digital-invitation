@@ -4,6 +4,12 @@ import { useState, useEffect } from "react";
 import BasicFields from "./sections/BasicFields";
 import { EnterpriseWeddingContent, RekeningBank, LoveStoryItem } from "@/types/wedding";
 
+interface MusicPreset {
+  id: string;
+  title: string;
+  url: string;
+}
+
 interface FormEnterpriseWeddingProps {
   onSubmit: (data: EnterpriseWeddingContent) => void;
   initialData?: Partial<EnterpriseWeddingContent>;
@@ -28,8 +34,10 @@ export default function FormEnterpriseWedding({ onSubmit, initialData }: FormEnt
     lokasiTeks: initialData?.lokasiTeks || "",
     lokasiMaps: initialData?.lokasiMaps || "",
 
-    // Fitur Khusus Enterprise
-    musicOption: initialData?.musicOption || "custom",
+    // Fitur Khusus Enterprise & Kontak / RSVP
+    whatsappPengantin: initialData?.whatsappPengantin || "",
+    enableRsvp: initialData?.enableRsvp ?? true,
+    musicOption: initialData?.musicOption || "preset",
     customMusicUrl: initialData?.customMusicUrl || "",
     liveStreamUrl: initialData?.liveStreamUrl || "",
     videoPrewedUrl: initialData?.videoPrewedUrl || "",
@@ -43,8 +51,9 @@ export default function FormEnterpriseWedding({ onSubmit, initialData }: FormEnt
       : [{ bank: "BCA", noRek: "", atasNama: "" }],
   });
 
-  // 1. STATE UNTUK MENAMPUNG DAFTAR TEMPLATE DARI DATABASE D1
-  const [templates, setTemplates] = useState([]);
+  // State Daftar Template & Musik Preset R2
+  const [templates, setTemplates] = useState<any[]>([]);
+  const [musicPresets, setMusicPresets] = useState<MusicPreset[]>([]);
 
   // State File Pendukung
   const [qrisFile, setQrisFile] = useState<File | null>(null);
@@ -53,42 +62,55 @@ export default function FormEnterpriseWedding({ onSubmit, initialData }: FormEnt
   const [musicFile, setMusicFile] = useState<File | null>(null);
   const [musicFileName, setMusicFileName] = useState<string>("");
 
+  // State Video MP4 Prewed R2
+  const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [videoFileName, setVideoFileName] = useState<string>("");
+
   const [galeriFiles, setGaleriFiles] = useState<File[]>([]);
   const [galeriPreviews, setGaleriPreviews] = useState<string[]>(initialData?.galeriFoto || []);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // 2. FETCH DAFTAR TEMPLATE SAAT KOMPONEN DI-MOUNT
+  // 1. FETCH DAFTAR TEMPLATE DAN MUSIK PRESET (R2) SAAT MOUNT
   useEffect(() => {
-    async function fetchTemplates() {
+    async function fetchData() {
+      // Fetch Templates
       try {
-        console.log("🚀 [FORM_ENTERPRISE] Fetching templates from /api/admin/templates...");
         const res = await fetch("/api/admin/templates");
-
-        if (!res.ok) {
-          throw new Error(`HTTP error! status: ${res.status}`);
-        }
-
-        const json = await res.json();
-        console.log("📦 [FORM_ENTERPRISE] Response from API:", json);
-
-        if (json.success && Array.isArray(json.data)) {
-          setTemplates(json.data);
-        } else if (Array.isArray(json)) {
-          setTemplates(json);
-        } else if (json.data) {
-          setTemplates(json.data);
+        if (res.ok) {
+          const json = await res.json();
+          if (json.success && Array.isArray(json.data)) {
+            setTemplates(json.data);
+          } else if (Array.isArray(json)) {
+            setTemplates(json);
+          } else if (json.data) {
+            setTemplates(json.data);
+          }
         }
       } catch (err) {
-        console.error("❌ [FORM_ENTERPRISE] Fetch templates error:", err);
+        console.error("❌ Fetch templates error:", err);
+      }
+
+      // Fetch Music Presets dari R2
+      try {
+        const resMusic = await fetch('/api/admin/preset-music');
+        if (resMusic.ok) {
+          const jsonMusic = await resMusic.json();
+          const list = jsonMusic.data || jsonMusic;
+          if (Array.isArray(list)) {
+            setMusicPresets(list);
+          }
+        }
+      } catch (err) {
+        console.error("❌ Fetch music presets error:", err);
       }
     }
 
-    fetchTemplates();
+    fetchData();
   }, []);
 
-  // Sinkronisasi jika initialData berubah/dimuat asynchronous
+  // Sinkronisasi jika initialData berubah
   useEffect(() => {
     if (initialData) {
       setFormData((prev) => ({
@@ -108,7 +130,7 @@ export default function FormEnterpriseWedding({ onSubmit, initialData }: FormEnt
     }
   }, [initialData]);
 
-  // Clean up Object URL untuk mencegah memory leak
+  // Clean up Object URL
   const safeRevokeObjectURL = (url: string) => {
     if (url && url.startsWith("blob:")) {
       URL.revokeObjectURL(url);
@@ -118,8 +140,14 @@ export default function FormEnterpriseWedding({ onSubmit, initialData }: FormEnt
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
   ) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+    const { name, value, type } = e.target;
+    
+    if (type === "checkbox") {
+      const { checked } = e.target as HTMLInputElement;
+      setFormData((prev) => ({ ...prev, [name]: checked }));
+    } else {
+      setFormData((prev) => ({ ...prev, [name]: value }));
+    }
   };
 
   // --- 1. QRIS (Single File) ---
@@ -145,7 +173,7 @@ export default function FormEnterpriseWedding({ onSubmit, initialData }: FormEnt
     setFormData((prev) => ({ ...prev, qrisImageUrl: "" }));
   };
 
-  // --- 2. Custom Musik (Single MP3) ---
+  // --- 2. Musik Management (Preset R2 & Custom Upload) ---
   const handleMusicSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -154,7 +182,16 @@ export default function FormEnterpriseWedding({ onSubmit, initialData }: FormEnt
     e.target.value = "";
   };
 
-  // --- 3. Galeri Foto (Multiple) ---
+  // --- 3. Video Prewedding File Select (MP4 ke R2) ---
+  const handleVideoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setVideoFile(file);
+    setVideoFileName(file.name);
+    e.target.value = "";
+  };
+
+  // --- 4. Galeri Foto (Multiple) ---
   const handleGaleriSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
@@ -174,7 +211,6 @@ export default function FormEnterpriseWedding({ onSubmit, initialData }: FormEnt
   const removeGaleriItem = async (index: number) => {
     const urlToRemove = galeriPreviews[index];
 
-    // Cek apakah itu file lama yang sudah tersimpan di database/R2
     if (formData.galeriFoto.includes(urlToRemove)) {
       try {
         await fetch("/api/admin/delete", {
@@ -191,21 +227,18 @@ export default function FormEnterpriseWedding({ onSubmit, initialData }: FormEnt
         galeriFoto: prev.galeriFoto.filter((url) => url !== urlToRemove),
       }));
     } else {
-      // Bebaskan memori jika itu blob URL lokal
       safeRevokeObjectURL(urlToRemove);
     }
 
-    // Hapus dari tampilan preview
     setGaleriPreviews((prev) => prev.filter((_, i) => i !== index));
 
-    // Cek jika itu file lokal baru yang belum sempat ter-upload
     const fileIndex = index - formData.galeriFoto.length;
     if (fileIndex >= 0) {
       setGaleriFiles((prev) => prev.filter((_, i) => i !== fileIndex));
     }
   };
 
-  // --- 4. Love Story Management ---
+  // --- 5. Love Story Management ---
   const handleStoryChange = (index: number, field: keyof LoveStoryItem, value: string) => {
     const updated = [...formData.loveStory];
     updated[index] = { ...updated[index], [field]: value };
@@ -226,7 +259,7 @@ export default function FormEnterpriseWedding({ onSubmit, initialData }: FormEnt
     }
   };
 
-  // --- 5. Rekening Management ---
+  // --- 6. Rekening Management ---
   const handleBankChange = (index: number, field: keyof RekeningBank, value: string) => {
     const updated = [...formData.rekeningBank];
     updated[index] = { ...updated[index], [field]: value };
@@ -247,7 +280,7 @@ export default function FormEnterpriseWedding({ onSubmit, initialData }: FormEnt
     }
   };
 
-  // Helper untuk Normalisasi YouTube Embed URL jika pengguna memasukkan link biasa
+  // Normalisasi Embed URL YouTube
   const formatEmbedUrl = (url: string) => {
     if (!url) return "";
     if (url.includes("youtube.com/watch?v=")) {
@@ -259,7 +292,7 @@ export default function FormEnterpriseWedding({ onSubmit, initialData }: FormEnt
     return url;
   };
 
-  // --- 6. Submit Handler (Upload ke R2) ---
+  // --- 7. Submit Handler ---
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
@@ -275,6 +308,7 @@ export default function FormEnterpriseWedding({ onSubmit, initialData }: FormEnt
     try {
       let finalQrisUrl = formData.qrisImageUrl;
       let finalMusicUrl = formData.customMusicUrl;
+      let finalVideoUrl = formData.videoPrewedUrl;
 
       // A. Upload QRIS
       if (qrisFile) {
@@ -289,8 +323,8 @@ export default function FormEnterpriseWedding({ onSubmit, initialData }: FormEnt
         finalQrisUrl = json.url;
       }
 
-      // B. Upload Custom Music
-      if (musicFile) {
+      // B. Upload Custom Music (jika opsi custom dipilih & file diunggah)
+      if (formData.musicOption === "custom" && musicFile) {
         const mData = new FormData();
         mData.append("file", musicFile);
         mData.append("slug", formData.slug);
@@ -302,7 +336,23 @@ export default function FormEnterpriseWedding({ onSubmit, initialData }: FormEnt
         finalMusicUrl = json.url;
       }
 
-      // C. Upload Galeri Foto Baru
+      // C. Upload Video MP4 Prewed ke R2 (jika file dipilih)
+      if (videoFile) {
+        const vData = new FormData();
+        vData.append("file", videoFile);
+        vData.append("slug", formData.slug);
+        vData.append("folderType", "video");
+
+        const res = await fetch("/api/admin/upload", { method: "POST", body: vData });
+        const json = await res.json();
+        if (!res.ok || !json.success) throw new Error(json.message || "Gagal upload video prewedding");
+        finalVideoUrl = json.url;
+      } else {
+        // Jika tidak upload file, gunakan formatter URL YouTube jika berupa link
+        finalVideoUrl = formatEmbedUrl(formData.videoPrewedUrl || "");
+      }
+
+      // D. Upload Galeri Foto Baru
       const uploadedGalleryUrls: string[] = [];
       for (const file of galeriFiles) {
         const gData = new FormData();
@@ -318,8 +368,8 @@ export default function FormEnterpriseWedding({ onSubmit, initialData }: FormEnt
 
       const finalPayload: EnterpriseWeddingContent = {
         ...formData,
-        liveStreamUrl: formatEmbedUrl(formData.liveStreamUrl),
-        videoPrewedUrl: formatEmbedUrl(formData.videoPrewedUrl),
+        liveStreamUrl: formatEmbedUrl(formData.liveStreamUrl || ""),
+        videoPrewedUrl: finalVideoUrl,
         qrisImageUrl: finalQrisUrl,
         customMusicUrl: finalMusicUrl,
         galeriFoto: [...formData.galeriFoto, ...uploadedGalleryUrls],
@@ -345,7 +395,7 @@ export default function FormEnterpriseWedding({ onSubmit, initialData }: FormEnt
           </h3>
         </div>
         <p className="text-xs text-slate-400 mt-0.5">
-          Konfigurasi lengkap tingkat lanjut dengan fitur Live Streaming, Video Embed, Custom Musik, dan Love Story.
+          Konfigurasi lengkap tingkat lanjut dengan fitur WhatsApp Kontak, RSVP, Live Streaming, Video Embed/MP4, Musik, dan Love Story.
         </p>
       </div>
 
@@ -355,17 +405,55 @@ export default function FormEnterpriseWedding({ onSubmit, initialData }: FormEnt
         </div>
       )}
 
-      {/* 3. MELEMPARKAN PROPS templates KE BASICFIELDS */}
+      {/* BASIC FIELDS */}
       <BasicFields
         formData={formData}
         onChange={handleChange}
         templates={templates}
       />
 
-      {/* Fitur Enterprise: Live Stream & Video Prewed Embed */}
+      {/* KONTAK WHATSAPP & RSVP CONFIG */}
       <div className="rounded-xl border border-amber-500/35 bg-amber-950/10 p-4 space-y-4">
         <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider">
-          🎥 Media & Live Streaming (Embed URL)
+          💬 Kontak WhatsApp & Pengaturan RSVP
+        </h4>
+
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-medium text-slate-300 mb-1">
+              Nomor WhatsApp Pengantin / Admin (Untuk Konfirmasi RSVP)
+            </label>
+            <input
+              type="text"
+              name="whatsappPengantin"
+              value={formData.whatsappPengantin || ""}
+              onChange={handleChange}
+              placeholder="Contoh: 6281234567890 (Awali dengan 62 tanpa tanda +)"
+              className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 focus:border-amber-500 focus:outline-none transition-colors"
+            />
+            <p className="text-[10px] text-slate-500 mt-1">Digunakan tamu untuk mengirim konfirmasi kehadiran (RSVP) langsung via WhatsApp.</p>
+          </div>
+
+          <div className="flex items-center gap-3 pt-1">
+            <input
+              type="checkbox"
+              id="enableRsvp"
+              name="enableRsvp"
+              checked={formData.enableRsvp ?? true}
+              onChange={handleChange}
+              className="h-4 w-4 rounded border-slate-800 bg-slate-950 text-amber-600 focus:ring-amber-500"
+            />
+            <label htmlFor="enableRsvp" className="text-xs font-medium text-slate-300 cursor-pointer">
+              Aktifkan Fitur Buku Tamu & RSVP di Halaman Undangan
+            </label>
+          </div>
+        </div>
+      </div>
+
+      {/* Media & Live Streaming */}
+      <div className="rounded-xl border border-amber-500/35 bg-amber-950/10 p-4 space-y-4">
+        <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider">
+          🎥 Media & Live Streaming
         </h4>
 
         <div className="space-y-3">
@@ -386,38 +474,146 @@ export default function FormEnterpriseWedding({ onSubmit, initialData }: FormEnt
 
           <div>
             <label className="block text-xs font-medium text-slate-300 mb-1">
-              URL Video Prewedding / Teaser (YouTube Link)
+              Video Prewedding / Teaser (Upload MP4 ke R2 atau Link YouTube)
             </label>
-            <input
-              type="url"
-              name="videoPrewedUrl"
-              value={formData.videoPrewedUrl}
-              onChange={handleChange}
-              placeholder="https://youtube.com/watch?v=..."
-              className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 focus:border-amber-500 focus:outline-none transition-colors"
-            />
+            
+            <div className="space-y-2">
+              <input
+                type="text"
+                name="videoPrewedUrl"
+                value={formData.videoPrewedUrl}
+                onChange={handleChange}
+                placeholder="https://youtube.com/watch?v=... atau https://pub-xxx.r2.dev/..."
+                className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 focus:border-amber-500 focus:outline-none transition-colors"
+              />
+
+              <div className="flex items-center gap-4">
+                <label className="px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer bg-amber-600 text-slate-950 hover:bg-amber-500 transition-all shadow-sm">
+                  {videoFileName ? "Ganti File Video MP4" : "Upload Video MP4 ke R2"}
+                  <input
+                    type="file"
+                    accept="video/mp4,video/webm"
+                    className="hidden"
+                    onChange={handleVideoSelect}
+                  />
+                </label>
+                <span className="text-xs text-slate-400 truncate max-w-xs">
+                  {videoFileName || (formData.videoPrewedUrl ? "Video terpasang" : "Belum ada file video dipilih")}
+                </span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Custom Musik Upload */}
-      <div className="rounded-xl border border-amber-500/35 bg-amber-950/10 p-4 space-y-3">
+      {/* FITUR MUSIK: OPTION, DROPDOWN R2, ATAU UPLOAD MP3 */}
+      <div className="rounded-xl border border-amber-500/35 bg-amber-950/10 p-4 space-y-4">
         <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider">
-          🎵 Musik Latar Belakang (Custom Upload MP3)
+          🎵 Musik Latar Belakang (BGM)
         </h4>
-        <div className="flex items-center gap-4">
-          <label className="px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer bg-amber-600 text-slate-950 hover:bg-amber-500 transition-all shadow-sm">
-            {musicFileName || formData.customMusicUrl ? "Ganti File Musik MP3" : "Pilih File MP3"}
-            <input
-              type="file"
-              accept="audio/mp3,audio/mpeg,audio/wav"
-              className="hidden"
-              onChange={handleMusicSelect}
-            />
-          </label>
-          <span className="text-xs text-slate-400 truncate max-w-xs">
-            {musicFileName || (formData.customMusicUrl ? "Musik kustom aktif tersimpan" : "Belum ada file musik dipilih")}
-          </span>
+
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-medium text-slate-300 mb-1">Pilih Sumber Musik</label>
+            <select
+              name="musicOption"
+              value={formData.musicOption}
+              onChange={handleChange}
+              className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 focus:border-amber-500 focus:outline-none"
+            >
+              <option value="preset">Pilih dari Musik Preset (R2 Storage)</option>
+              <option value="custom">Upload File MP3 Sendiri (Custom)</option>
+              <option value="none">Tanpa Musik Latar</option>
+            </select>
+          </div>
+
+          {/* Jika Pilihan PRESET (Pilih dari R2) */}
+          {formData.musicOption === "preset" && (
+            <div className="space-y-2 pt-1">
+              <label className="block text-xs font-medium text-slate-300 mb-1">
+                Pilih Lagu dari Library R2
+              </label>
+              <select
+                name="customMusicUrl"
+                value={formData.customMusicUrl}
+                onChange={handleChange}
+                className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 focus:border-amber-500 focus:outline-none"
+              >
+                <option value="">-- Pilih Lagu --</option>
+                {musicPresets.map((m) => (
+                  <option key={m.id || m.url} value={m.url}>
+                    {m.title}
+                  </option>
+                ))}
+              </select>
+
+              {formData.customMusicUrl && !formData.customMusicUrl.startsWith("blob:") && (
+                <div className="mt-2 rounded-lg bg-slate-900 p-2.5 border border-slate-800">
+                  <p className="text-[11px] text-slate-400 mb-1 font-medium">Pratinjau Suara Musik:</p>
+                  <audio 
+                    controls 
+                    src={
+                      formData.customMusicUrl.startsWith("http") 
+                        ? formData.customMusicUrl 
+                        : `${process.env.NEXT_PUBLIC_R2_PUBLIC_DOMAIN}${formData.customMusicUrl.startsWith("/") ? "" : "/"}${formData.customMusicUrl}`
+                    } 
+                    className="w-full h-8" 
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Jika Pilihan CUSTOM (Upload File MP3) */}
+          {formData.musicOption === "custom" && (
+            <div className="space-y-3 pt-1">
+              <label className="block text-xs font-medium text-slate-300 mb-1">
+                Unggah File Musik Baru (.mp3)
+              </label>
+              <div className="flex items-center gap-4">
+                <label className="px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer bg-amber-600 text-slate-950 hover:bg-amber-500 transition-all shadow-sm">
+                  {musicFileName || formData.customMusicUrl ? "Ganti File MP3" : "Pilih File MP3"}
+                  <input
+                    type="file"
+                    accept="audio/mp3,audio/mpeg,audio/wav"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        handleMusicSelect(e);
+                        
+                        const localBlobUrl = URL.createObjectURL(file);
+                        setFormData((prev) => ({
+                          ...prev,
+                          customMusicUrl: localBlobUrl,
+                        }));
+                      }
+                    }}
+                  />
+                </label>
+                <span className="text-xs text-slate-400 truncate max-w-xs">
+                  {musicFileName || "Belum ada file dipilih"}
+                </span>
+              </div>
+
+              {/* Kotak Pratinjau Audio */}
+              {formData.customMusicUrl && (
+                <div className="mt-2 rounded-lg bg-slate-900 p-2.5 border border-slate-800">
+                  <p className="text-[11px] text-slate-400 mb-1 font-medium">Pratinjau Suara Musik:</p>
+                  <audio 
+                    key={formData.customMusicUrl} 
+                    controls 
+                    src={
+                      formData.customMusicUrl.startsWith("http") || formData.customMusicUrl.startsWith("blob:")
+                        ? formData.customMusicUrl 
+                        : `${process.env.NEXT_PUBLIC_R2_PUBLIC_DOMAIN}${formData.customMusicUrl.startsWith("/") ? "" : "/"}${formData.customMusicUrl}`
+                    } 
+                    className="w-full h-8" 
+                  />
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -515,10 +711,10 @@ export default function FormEnterpriseWedding({ onSubmit, initialData }: FormEnt
       {/* Kado Digital & Amplop (QRIS & Multi Rekening) */}
       <div className="rounded-xl border border-amber-500/35 bg-amber-950/10 p-4 space-y-4">
         <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider">
-          💳 Kado Digital & Amplop
+          💳 Kado Digital & Angpao (QRIS & Rekening)
         </h4>
 
-        {/* QRIS */}
+        {/* QRIS Upload */}
         <div className="space-y-2">
           <label className="block text-xs font-medium text-slate-300">Gambar QRIS (1 Gambar)</label>
           <div className="flex items-center gap-4">
@@ -542,47 +738,60 @@ export default function FormEnterpriseWedding({ onSubmit, initialData }: FormEnt
           </div>
         </div>
 
-        {/* Multi Rekening Bank */}
+        {/* Multi Rekening Bank dengan Nomor Urut */}
         <div className="space-y-3 pt-2">
           <div className="flex items-center justify-between">
-            <label className="block text-xs font-medium text-slate-300">Daftar Rekening Bank & E-Wallet</label>
-            <button type="button" onClick={addBankSlot} className="text-xs font-semibold text-amber-400 hover:underline">+ Tambah Rekening</button>
+            <label className="block text-xs font-medium text-slate-300">
+              Daftar Rekening Bank & E-Wallet
+            </label>
+            <button
+              type="button"
+              onClick={addBankSlot}
+              className="text-xs font-semibold text-amber-400 hover:underline"
+            >
+              + Tambah Rekening
+            </button>
           </div>
 
           {formData.rekeningBank.map((bankItem, idx) => (
-            <div key={idx} className="grid grid-cols-1 gap-2 sm:grid-cols-3 rounded-lg border border-slate-800 bg-slate-950 p-3 relative">
-              <input
-                type="text"
-                value={bankItem.bank}
-                onChange={(e) => handleBankChange(idx, "bank", e.target.value)}
-                placeholder="Bank / E-Wallet (BCA / DANA)"
-                className="rounded border border-slate-800 bg-slate-900 px-2.5 py-1.5 text-xs text-slate-200 focus:border-amber-500 focus:outline-none"
-              />
-              <input
-                type="text"
-                value={bankItem?.noRek || ""}
-                onChange={(e) => handleBankChange(idx, "noRek", e.target.value)}
-                placeholder="Nomor Rekening"
-                className="rounded border border-slate-800 bg-slate-900 px-2.5 py-1.5 text-xs text-slate-200 focus:border-amber-500 focus:outline-none"
-              />
-              <div className="flex gap-2">
+            <div key={idx} className="space-y-1">
+              <span className="text-[10px] font-semibold text-amber-400/80">
+                Rekening #{idx + 1}
+              </span>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 rounded-lg border border-slate-800 bg-slate-950 p-3 relative">
                 <input
                   type="text"
-                  value={bankItem.atasNama}
-                  onChange={(e) => handleBankChange(idx, "atasNama", e.target.value)}
-                  placeholder="Atas Nama"
-                  className="w-full rounded border border-slate-800 bg-slate-900 px-2.5 py-1.5 text-xs text-slate-200 focus:border-amber-500 focus:outline-none"
+                  value={bankItem.bank}
+                  onChange={(e) => handleBankChange(idx, "bank", e.target.value)}
+                  placeholder="Bank / E-Wallet (BCA / DANA)"
+                  className="rounded border border-slate-800 bg-slate-900 px-2.5 py-1.5 text-xs text-slate-200 focus:border-amber-500 focus:outline-none"
                 />
-                {formData.rekeningBank.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => removeBankSlot(idx)}
-                    className="rounded bg-red-600/10 px-2.5 text-xs text-red-400 hover:bg-red-600 hover:text-white transition-colors"
-                    title="Hapus Rekening"
-                  >
-                    ✕
-                  </button>
-                )}
+                <input
+                  type="text"
+                  value={bankItem?.noRek || ""}
+                  onChange={(e) => handleBankChange(idx, "noRek", e.target.value)}
+                  placeholder="Nomor Rekening / No HP E-Wallet"
+                  className="rounded border border-slate-800 bg-slate-900 px-2.5 py-1.5 text-xs text-slate-200 focus:border-amber-500 focus:outline-none"
+                />
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={bankItem.atasNama}
+                    onChange={(e) => handleBankChange(idx, "atasNama", e.target.value)}
+                    placeholder="Atas Nama"
+                    className="w-full rounded border border-slate-800 bg-slate-900 px-2.5 py-1.5 text-xs text-slate-200 focus:border-amber-500 focus:outline-none"
+                  />
+                  {formData.rekeningBank.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => removeBankSlot(idx)}
+                      className="rounded bg-red-600/10 px-2.5 text-xs text-red-400 hover:bg-red-600 hover:text-white transition-colors"
+                      title="Hapus Rekening"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           ))}

@@ -1,5 +1,6 @@
 // --- 1. KONTEN PAKET BASIC ---
-export type TemplateOption = "theme-minimalist" | "theme-rustic" | "theme-luxury";
+export type TemplateOption = "theme-minimalist" | "theme-rustic" | "theme-luxury" | "theme-enterprise-luxury";
+
 export interface BasicWeddingContent {
   templateId: TemplateOption; // <--- Pilihan Template
   slug: string;
@@ -45,6 +46,8 @@ export type MusicOption =
 
 export interface PremiumWeddingContent extends BasicWeddingContent {
   musicOption?: string;
+  noWhatsapp?: string;   // Opsional: Nomor WA pengantin
+  enableRsvp?: boolean;   // Opsional: Sakelar aktif/nonaktifkan RSVP
   customMusicUrl?: string;
   galeriFoto: string[]; // Maksimal 10 URL Foto
   qrisImageUrl?: string;
@@ -53,8 +56,10 @@ export interface PremiumWeddingContent extends BasicWeddingContent {
 
 // --- KONTEN PAKET ENTERPRISE ---
 export interface EnterpriseWeddingContent extends PremiumWeddingContent {
-  enableRSVP: boolean;
-  enableGuestBook: boolean;
+  enableRSVP?: boolean;
+  whatsappPengantin?: string; // <-- TAMBAHKAN BARIS INI
+  enableRsvp?: boolean;
+  enableGuestBook?: boolean;
   liveStreamUrl?: string;
   videoPrewedUrl?: string;
   customMusicUrl?: string;
