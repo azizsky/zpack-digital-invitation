@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { S3Client, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 
 // Helper ekstraksi Key R2 dari URL/Path
 function extractR2Key(fileUrl: string): string {
@@ -48,14 +49,13 @@ export async function POST(request: Request) {
     // SKENARIO A: Berjalan di Cloudflare Pages / Workers (Production)
     // ----------------------------------------------------
     let bucket: any = null;
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { getRequestContext } = require("@cloudflare/next-on-pages");
-      bucket = getRequestContext().env.MY_BUCKET;
-    } catch (e) {
-      bucket = null;
-    }
 
+      try {
+        const { env } = getCloudflareContext();
+        bucket = (env as any).MY_BUCKET;
+      } catch (e) {
+        bucket = null;
+      }
     if (bucket) {
       console.log(`🗑️ [Cloudflare Binding] Menghapus file R2 Key: ${key}`);
       await bucket.delete(key);

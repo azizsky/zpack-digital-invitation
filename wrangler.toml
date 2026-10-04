@@ -7,3 +7,6 @@ binding = "DB"
 database_name = "zpack-db"
 database_id = "5a14776e-fe54-4a8f-99b4-97a35542b35d"
 
+[[r2_buckets]]
+binding = "MY_BUCKET"
+bucket_name = "zpack"

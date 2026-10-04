@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 import {
   S3Client,
   PutObjectCommand,
@@ -37,15 +38,13 @@ export async function POST(request: Request) {
     let bucket: any = null;
     let env: any = {};
 
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { getRequestContext } = require("@cloudflare/next-on-pages");
-      const ctx = getRequestContext();
-      bucket = ctx.env.MY_BUCKET;
-      env = ctx.env;
-    } catch (e) {
-      bucket = null;
-    }
+      try {
+        const context = getCloudflareContext();
+        env = context.env;
+        bucket = (env as any).MY_BUCKET;
+      } catch (e) {
+        bucket = null;
+      }
 
     if (bucket) {
       // 1. Bersihkan file lama jika folderType qris atau music

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { S3Client, ListObjectsV2Command } from "@aws-sdk/client-s3";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 
 // Helper untuk format URL R2 tanpa dobel slash
 function formatR2Url(domain: string, key: string): string {
@@ -12,19 +13,16 @@ export async function GET() {
   try {
     // ----------------------------------------------------
     // SKENARIO A: Berjalan di Cloudflare Pages / Workers (Production)
-    // ----------------------------------------------------
     let bucket: any = null;
-    let env: any = {};
+      let env: any = {};
 
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { getRequestContext } = require("@cloudflare/next-on-pages");
-      const ctx = getRequestContext();
-      bucket = ctx.env.MY_BUCKET;
-      env = ctx.env;
-    } catch (e) {
-      bucket = null;
-    }
+      try {
+        const context = getCloudflareContext();
+        env = context.env;
+        bucket = (env as any).MY_BUCKET;
+      } catch (e) {
+        bucket = null;
+      }
 
     if (bucket) {
       const publicDomain =

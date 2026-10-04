@@ -26,6 +26,7 @@ async function getInvitationBySlug(slug: string) {
     );
 
     const json = await res.json();
+
     if (!json.success || !json.result[0]?.results?.length) return null;
 
     return json.result[0].results[0];
@@ -38,6 +39,7 @@ async function getInvitationBySlug(slug: string) {
 // HELPER UNTUK MEMPERBAIKI PATH R2/IMAGE RELATIF
 function fixR2Path(pathStr: string | undefined): string {
   if (!pathStr) return "";
+
   let clean = pathStr.trim();
 
   // Jika sudah berupa URL lengkap (http/https), biarkan
@@ -59,7 +61,7 @@ function fixR2Path(pathStr: string | undefined): string {
 export default async function PublicInvitationPage({
   params,
 }: {
-  params: Promise<{ slug: string }> | { slug: string };
+  params: Promise<{ slug: string }>;
 }) {
   // Safe resolve params untuk kompatibilitas Next.js App Router
   const resolvedParams = await Promise.resolve(params);
@@ -81,10 +83,18 @@ export default async function PublicInvitationPage({
     customMusicUrl: "",
     galeriFoto: [] as string[],
     qrisUrl: "",
-    rekeningList: [] as { bank: string; norek: string; atas_nama: string }[],
+    rekeningList: [] as {
+      bank: string;
+      norek: string;
+      atas_nama: string;
+    }[],
     liveStreamUrl: "",
     videoTeaserUrl: "",
-    loveStoryList: [] as { tahun_atau_tanggal: string; judul: string; cerita: string }[],
+    loveStoryList: [] as {
+      tahun_atau_tanggal: string;
+      judul: string;
+      cerita: string;
+    }[],
   };
 
   try {
@@ -131,7 +141,8 @@ export default async function PublicInvitationPage({
           ? parsed.loveStoryList
           : Array.isArray(parsed.loveStory)
           ? parsed.loveStory.map((l: any) => ({
-              tahun_atau_tanggal: l.tahun || l.tahun_atau_tanggal || "",
+              tahun_atau_tanggal:
+                l.tahun || l.tahun_atau_tanggal || "",
               judul: l.judul || "",
               cerita: l.deskripsi || l.cerita || "",
             }))
@@ -142,5 +153,10 @@ export default async function PublicInvitationPage({
     console.error("Gagal parse xtra_data:", e);
   }
 
-  return <EnterpriseMasterClient invitation={invitation} xtraData={xtraData} />;
+  return (
+    <EnterpriseMasterClient
+      invitation={invitation}
+      xtraData={xtraData}
+    />
+  );
 }

@@ -1,7 +1,16 @@
-import { NextResponse } from "next/server";
-import { S3Client, ListObjectsV2Command, DeleteObjectsCommand } from "@aws-sdk/client-s3";
 
+import { NextResponse } from "next/server";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
+import {
+  S3Client,
+  ListObjectsV2Command,
+  DeleteObjectsCommand,
+} from "@aws-sdk/client-s3";
+
+// ============================================================
 // Inisialisasi S3 client Cloudflare R2
+// ============================================================
+
 const r2 = new S3Client({
   region: "auto",
   endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
@@ -11,7 +20,11 @@ const r2 = new S3Client({
   },
 });
 
-// Helper Query ke Cloudflare D1 REST API (saat npm run dev)
+// ============================================================
+// Helper Query ke Cloudflare D1 REST API
+// Digunakan saat npm run dev / fallback
+// ============================================================
+
 async function queryRemoteD1(sql: string, params: any[] = []) {
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
   const databaseId = process.env.CLOUDFLARE_DATABASE_ID;
@@ -34,45 +47,63 @@ async function queryRemoteD1(sql: string, params: any[] = []) {
   );
 
   const json = await res.json();
+
   if (!json.success) {
-    throw new Error(json.errors?.[0]?.message || "Gagal query ke Remote D1");
+    throw new Error(
+      json.errors?.[0]?.message || "Gagal query ke Remote D1"
+    );
   }
+
   return json.result[0];
 }
 
-// Helper pintar eksekusi SQL (Mendukung lokal & Cloudflare Pages)
+// ============================================================
+// Helper pintar eksekusi SQL
+// Mendukung Cloudflare D1 Binding + fallback Remote D1
+// ============================================================
+
 async function executeQuery(sql: string, params: any[] = []) {
   let DB: any = null;
+
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { getRequestContext } = require("@cloudflare/next-on-pages");
-    DB = getRequestContext().env.DB;
+    const { env } = getCloudflareContext();
+
+    // Binding D1 dari wrangler.toml
+    DB = (env as any).DB;
   } catch (e) {
     DB = null;
   }
 
   if (DB) {
     const stmt = DB.prepare(sql).bind(...params);
+
     if (sql.trim().toUpperCase().startsWith("SELECT")) {
       const { results } = await stmt.all();
       return results;
-    } else {
-      return await stmt.run();
     }
+
+    return await stmt.run();
   }
 
+  // Fallback untuk local development
   const result = await queryRemoteD1(sql, params);
-  return sql.trim().toUpperCase().startsWith("SELECT") ? result.results : result;
+
+  return sql.trim().toUpperCase().startsWith("SELECT")
+    ? result.results
+    : result;
 }
 
+// ============================================================
 // Helper membersihkan folder file di R2 berdasarkan slug
+// ============================================================
+
 async function cleanupR2Folder(slug: string) {
   const bucketName = process.env.R2_BUCKET_NAME;
   const accountId = process.env.R2_ACCOUNT_ID;
-  
+
   if (!bucketName || !accountId) return;
-  
-  const cleanSlug = slug.replace(/^\/+|\/+$/g, ""); 
+
+  const cleanSlug = slug.replace(/^\/+|\/+$/g, "");
   const prefix = `${cleanSlug}/`;
 
   try {
@@ -83,16 +114,27 @@ async function cleanupR2Folder(slug: string) {
       })
     );
 
-    if (listedObjects.Contents && listedObjects.Contents.length > 0) {
+    if (
+      listedObjects.Contents &&
+      listedObjects.Contents.length > 0
+    ) {
       const deleteParams = {
         Bucket: bucketName,
         Delete: {
-          Objects: listedObjects.Contents.map((val) => ({ Key: val.Key! })),
+          Objects: listedObjects.Contents
+            .filter((val) => val.Key)
+            .map((val) => ({
+              Key: val.Key!,
+            })),
         },
       };
 
-      await r2.send(new DeleteObjectsCommand(deleteParams));
-      
+      await r2.send(
+        new DeleteObjectsCommand(deleteParams)
+      );
+
+      // Jika masih ada object berikutnya, bersihkan lagi.
+      // Catatan: implementasi sederhana ini mempertahankan struktur lama.
       if (listedObjects.IsTruncated) {
         await cleanupR2Folder(slug);
       }
@@ -105,9 +147,11 @@ async function cleanupR2Folder(slug: string) {
 // ====================================================================
 // 1. GET: Ambil Daftar Undangan
 // ====================================================================
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
+
     const category = searchParams.get("category");
     const pkg = searchParams.get("package");
 
@@ -115,13 +159,16 @@ export async function GET(request: Request) {
     const params: string[] = [];
 
     if (category && pkg) {
-      query += " WHERE category = ? AND package = ? ORDER BY created_at DESC";
+      query +=
+        " WHERE category = ? AND package = ? ORDER BY created_at DESC";
       params.push(category, pkg);
     } else if (category) {
-      query += " WHERE category = ? ORDER BY created_at DESC";
+      query +=
+        " WHERE category = ? ORDER BY created_at DESC";
       params.push(category);
     } else if (pkg) {
-      query += " WHERE package = ? ORDER BY created_at DESC";
+      query +=
+        " WHERE package = ? ORDER BY created_at DESC";
       params.push(pkg);
     } else {
       query += " ORDER BY created_at DESC";
@@ -131,14 +178,25 @@ export async function GET(request: Request) {
 
     const formattedData = (results || []).map((row: any) => ({
       ...row,
-      xtra_data: row.xtra_data ? JSON.parse(row.xtra_data) : null,
+      xtra_data: row.xtra_data
+        ? JSON.parse(row.xtra_data)
+        : null,
     }));
 
-    return NextResponse.json({ success: true, data: formattedData });
+    return NextResponse.json({
+      success: true,
+      data: formattedData,
+    });
   } catch (error: any) {
     console.error("Error Fetch Invitations:", error);
+
     return NextResponse.json(
-      { success: false, message: error.message || "Gagal mengambil data", data: [] },
+      {
+        success: false,
+        message:
+          error.message || "Gagal mengambil data",
+        data: [],
+      },
       { status: 500 }
     );
   }
@@ -147,6 +205,7 @@ export async function GET(request: Request) {
 // ====================================================================
 // 2. DELETE: Hapus Undangan berdasarkan ID
 // ====================================================================
+
 export async function DELETE(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -154,41 +213,70 @@ export async function DELETE(request: Request) {
 
     if (!id) {
       return NextResponse.json(
-        { success: false, message: "ID wajib diisi untuk menghapus!" },
+        {
+          success: false,
+          message: "ID wajib diisi untuk menghapus!",
+        },
         { status: 400 }
       );
     }
 
-    const targetData = await executeQuery("SELECT slug FROM invitations WHERE id = ?", [id]);
-    if (targetData && targetData.length > 0) {
+    const targetData = await executeQuery(
+      "SELECT slug FROM invitations WHERE id = ?",
+      [id]
+    );
+
+    if (
+      targetData &&
+      targetData.length > 0
+    ) {
       await cleanupR2Folder(targetData[0].slug);
     }
 
-    await executeQuery("DELETE FROM invitations WHERE id = ?", [id]);
+    await executeQuery(
+      "DELETE FROM invitations WHERE id = ?",
+      [id]
+    );
 
     return NextResponse.json({
       success: true,
-      message: "Undangan dan file terkait berhasil dihapus!",
+      message:
+        "Undangan dan file terkait berhasil dihapus!",
     });
   } catch (error: any) {
     return NextResponse.json(
-      { success: false, message: error.message || "Gagal menghapus" },
+      {
+        success: false,
+        message:
+          error.message || "Gagal menghapus",
+      },
       { status: 500 }
     );
   }
 }
 
 // ====================================================================
-// 3. POST: Simpan Undangan Baru (Lengkap dengan WA & Video Prewed)
+// 3. POST: Simpan Undangan Baru
 // ====================================================================
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { slug, category, package: pkg, content } = body;
+
+    const {
+      slug,
+      category,
+      package: pkg,
+      content,
+    } = body;
 
     if (!slug || !content) {
       return NextResponse.json(
-        { success: false, message: "Slug dan data undangan wajib diisi!" },
+        {
+          success: false,
+          message:
+            "Slug dan data undangan wajib diisi!",
+        },
         { status: 400 }
       );
     }
@@ -198,16 +286,22 @@ export async function POST(request: Request) {
       [slug]
     );
 
-    if (existing && existing.length > 0) {
+    if (
+      existing &&
+      existing.length > 0
+    ) {
       return NextResponse.json(
-        { success: false, message: `Slug "/wedding/${slug}" sudah digunakan!` },
+        {
+          success: false,
+          message: `Slug "/wedding/${slug}" sudah digunakan!`,
+        },
         { status: 400 }
       );
     }
 
     const id = Date.now().toString();
 
-    // 🎯 ESTRAKSI SELURUH FITUR ENTERPRISE
+    // Ekstraksi seluruh fitur tambahan
     const {
       musicOption,
       customMusicUrl,
@@ -223,20 +317,27 @@ export async function POST(request: Request) {
       ...basic
     } = content;
 
-    // 💡 SUSUN XTRADATA LENGKAP
-    const xtraData = JSON.stringify({
-      musicOption: musicOption || "none",
-      customMusicUrl: customMusicUrl || "",
-      whatsappPengantin: whatsappPengantin || "",
-      enableRsvp: enableRsvp ?? true,
-      enableWaNotification: true,
-      liveStreamUrl: liveStreamUrl || "",
-      videoPrewedUrl: videoPrewedUrl || "",
-      galeriFoto: galeriFoto || [],
-      loveStory: loveStory || [],
-      qrisImageUrl: qrisImageUrl || "",
-      rekeningBank: rekeningBank || [],
-    });
+    // Susun XtraData lengkap
+const xtraData = JSON.stringify({
+  musicOption: musicOption || "none",
+  customMusicUrl: customMusicUrl || "",
+  whatsappPengantin:
+    whatsappPengantin || "",
+  enableRsvp: enableRsvp ?? true,
+  enableWaNotification: true,
+  liveStreamUrl:
+    liveStreamUrl || "",
+  videoPrewedUrl:
+    videoPrewedUrl || "",
+  galeriFoto:
+    galeriFoto || [],
+  loveStory:
+    loveStory || [],
+  qrisImageUrl:
+    qrisImageUrl || "",
+  rekeningBank:
+    rekeningBank || [],
+});
 
     const insertQuery = `
       INSERT INTO invitations (
@@ -256,7 +357,8 @@ export async function POST(request: Request) {
       slug,
       category || "wedding",
       pkg || "basic",
-      basic.templateId || "theme-minimalist",
+      basic.templateId ||
+        "theme-minimalist",
       basic.namaPanggilanPria || "",
       basic.namaPanggilanWanita || "",
       basic.namaLengkapPria || "",
@@ -274,37 +376,62 @@ export async function POST(request: Request) {
       xtraData,
     ];
 
-    await executeQuery(insertQuery, insertParams);
+    await executeQuery(
+      insertQuery,
+      insertParams
+    );
 
     return NextResponse.json({
       success: true,
-      message: "Undangan berhasil disimpan ke Database D1!",
+      message:
+        "Undangan berhasil disimpan ke Database D1!",
     });
   } catch (error: any) {
-    console.error("Error Save Invitation:", error);
+    console.error(
+      "Error Save Invitation:",
+      error
+    );
+
     return NextResponse.json(
-      { success: false, message: error.message || "Gagal menyimpan ke D1" },
+      {
+        success: false,
+        message:
+          error.message ||
+          "Gagal menyimpan ke D1",
+      },
       { status: 500 }
     );
   }
 }
 
 // ====================================================================
-// 4. PUT: Update Undangan (Lengkap dengan WA & Video Prewed)
+// 4. PUT: Update Undangan
 // ====================================================================
+
 export async function PUT(request: Request) {
   try {
     const body = await request.json();
-    const { id, slug, category, package: pkg, content } = body;
+
+    const {
+      id,
+      slug,
+      category,
+      package: pkg,
+      content,
+    } = body;
 
     if (!id || !slug || !content) {
       return NextResponse.json(
-        { success: false, message: "ID, Slug, dan data undangan wajib diisi!" },
+        {
+          success: false,
+          message:
+            "ID, Slug, dan data undangan wajib diisi!",
+        },
         { status: 400 }
       );
     }
 
-    // 🎯 ESTRAKSI SELURUH FITUR ENTERPRISE
+    // Ekstraksi seluruh fitur tambahan
     const {
       musicOption,
       customMusicUrl,
@@ -320,20 +447,27 @@ export async function PUT(request: Request) {
       ...basic
     } = content;
 
-    // 💡 SUSUN XTRADATA LENGKAP SAAT UPDATE
-    const xtraData = JSON.stringify({
-      musicOption: musicOption || "none",
-      customMusicUrl: customMusicUrl || "",
-      whatsappPengantin: whatsappPengantin || "",
-      enableRsvp: enableRsvp ?? true,
-      enableWaNotification: true,
-      liveStreamUrl: liveStreamUrl || "",
-      videoPrewedUrl: videoPrewedUrl || "",
-      galeriFoto: galeriFoto || [],
-      loveStory: loveStory || [],
-      qrisImageUrl: qrisImageUrl || "",
-      rekeningBank: rekeningBank || [],
-    });
+   // Susun XtraData lengkap saat update
+const xtraData = JSON.stringify({
+  musicOption: musicOption || "none",
+  customMusicUrl: customMusicUrl || "",
+  whatsappPengantin:
+    whatsappPengantin || "",
+  enableRsvp: enableRsvp ?? true,
+  enableWaNotification: true,
+  liveStreamUrl:
+    liveStreamUrl || "",
+  videoPrewedUrl:
+    videoPrewedUrl || "",
+  galeriFoto:
+    galeriFoto || [],
+  loveStory:
+    loveStory || [],
+  qrisImageUrl:
+    qrisImageUrl || "",
+  rekeningBank:
+    rekeningBank || [],
+});
 
     const updateQuery = `
       UPDATE invitations SET
@@ -352,7 +486,8 @@ export async function PUT(request: Request) {
       slug,
       category || "wedding",
       pkg || "basic",
-      basic.templateId || "theme-minimalist",
+      basic.templateId ||
+        "theme-minimalist",
       basic.namaPanggilanPria || "",
       basic.namaPanggilanWanita || "",
       basic.namaLengkapPria || "",
@@ -371,16 +506,29 @@ export async function PUT(request: Request) {
       id,
     ];
 
-    await executeQuery(updateQuery, updateParams);
+    await executeQuery(
+      updateQuery,
+      updateParams
+    );
 
     return NextResponse.json({
       success: true,
-      message: "Undangan berhasil diperbarui!",
+      message:
+        "Undangan berhasil diperbarui!",
     });
   } catch (error: any) {
-    console.error("Error Update Invitation:", error);
+    console.error(
+      "Error Update Invitation:",
+      error
+    );
+
     return NextResponse.json(
-      { success: false, message: error.message || "Gagal memperbarui data" },
+      {
+        success: false,
+        message:
+          error.message ||
+          "Gagal memperbarui data",
+      },
       { status: 500 }
     );
   }
