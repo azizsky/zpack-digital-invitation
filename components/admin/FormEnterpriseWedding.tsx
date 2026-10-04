@@ -33,10 +33,12 @@ export default function FormEnterpriseWedding({ onSubmit, initialData }: FormEnt
     waktuResepsi: initialData?.waktuResepsi || "11.00 - 14.00 WIB",
     lokasiTeks: initialData?.lokasiTeks || "",
     lokasiMaps: initialData?.lokasiMaps || "",
+    
 
     // Fitur Khusus Enterprise & Kontak / RSVP
     whatsappPengantin: initialData?.whatsappPengantin || "",
     enableRsvp: initialData?.enableRsvp ?? true,
+    enableWaNotification: initialData?.enableWaNotification ?? false,
     musicOption: initialData?.musicOption || "preset",
     customMusicUrl: initialData?.customMusicUrl || "",
     liveStreamUrl: initialData?.liveStreamUrl || "",
@@ -111,24 +113,38 @@ export default function FormEnterpriseWedding({ onSubmit, initialData }: FormEnt
   }, []);
 
   // Sinkronisasi jika initialData berubah
-  useEffect(() => {
-    if (initialData) {
-      setFormData((prev) => ({
-        ...prev,
-        ...initialData,
-        loveStory: initialData.loveStory?.length ? initialData.loveStory : prev.loveStory,
-        rekeningBank: initialData.rekeningBank?.length ? initialData.rekeningBank : prev.rekeningBank,
-        galeriFoto: initialData.galeriFoto || [],
-      }));
+ useEffect(() => {
+  if (initialData) {
+    // 1. Ambil nilai enableRsvp (cek direct property atau di dalam xtraData jika ada)
+    const rawRsvp = initialData.enableRsvp ?? (initialData as any).xtraData?.enableRsvp;
+    const isRsvpActive = rawRsvp !== undefined ? Boolean(rawRsvp) : false;
 
-      if (initialData.galeriFoto) {
-        setGaleriPreviews(initialData.galeriFoto);
-      }
-      if (initialData.qrisImageUrl) {
-        setQrisPreview(initialData.qrisImageUrl);
-      }
+    // 2. Ambil nilai enableWaNotification
+    const rawWaNotif = initialData.enableWaNotification ?? (initialData as any).xtraData?.enableWaNotification;
+    const isWaNotifActive = rawWaNotif !== undefined ? Boolean(rawWaNotif) : false;
+
+    setFormData((prev) => ({
+      ...prev,
+      ...initialData,
+      // Paksa nilai boolean yang tepat
+      enableRsvp: isRsvpActive,
+      // Jika enableRsvp false, paksakan enableWaNotification jadi false saat memuat data edit
+      enableWaNotification: isRsvpActive ? isWaNotifActive : false,
+      whatsappPengantin: isRsvpActive ? (initialData.whatsappPengantin || "") : "",
+
+      loveStory: initialData.loveStory?.length ? initialData.loveStory : prev.loveStory,
+      rekeningBank: initialData.rekeningBank?.length ? initialData.rekeningBank : prev.rekeningBank,
+      galeriFoto: initialData.galeriFoto || [],
+    }));
+
+    if (initialData.galeriFoto) {
+      setGaleriPreviews(initialData.galeriFoto);
     }
-  }, [initialData]);
+    if (initialData.qrisImageUrl) {
+      setQrisPreview(initialData.qrisImageUrl);
+    }
+  }
+}, [initialData]);
 
   // Clean up Object URL
   const safeRevokeObjectURL = (url: string) => {
@@ -149,6 +165,7 @@ export default function FormEnterpriseWedding({ onSubmit, initialData }: FormEnt
       setFormData((prev) => ({ ...prev, [name]: value }));
     }
   };
+
 
   // --- 1. QRIS (Single File) ---
   const handleQrisSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -186,9 +203,46 @@ export default function FormEnterpriseWedding({ onSubmit, initialData }: FormEnt
   const handleVideoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    if (file.size > 100 * 1024 * 1024) {
+      alert("⚠️ Ukuran file video terlalu besar! Maksimal 100MB.");
+      e.target.value = "";
+      return;
+    }
+
     setVideoFile(file);
     setVideoFileName(file.name);
+
+    // Buat Blob URL sementara untuk Pratinjau Langsung
+    const localBlobUrl = URL.createObjectURL(file);
+    setFormData((prev) => ({
+      ...prev,
+      videoPrewedUrl: localBlobUrl,
+    }));
+
     e.target.value = "";
+  };
+
+  const removeVideo = async () => {
+    const videoUrlToRemove = formData.videoPrewedUrl;
+
+    if (videoUrlToRemove && videoUrlToRemove.startsWith("blob:")) {
+      safeRevokeObjectURL(videoUrlToRemove);
+    } else if (videoUrlToRemove && videoUrlToRemove.includes(".r2.dev")) {
+      try {
+        await fetch("/api/admin/delete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fileUrl: videoUrlToRemove }),
+        });
+      } catch (err) {
+        console.error("Gagal menghapus file video dari R2:", err);
+      }
+    }
+
+    setVideoFile(null);
+    setVideoFileName("");
+    setFormData((prev) => ({ ...prev, videoPrewedUrl: "" }));
   };
 
   // --- 4. Galeri Foto (Multiple) ---
@@ -293,7 +347,7 @@ export default function FormEnterpriseWedding({ onSubmit, initialData }: FormEnt
   };
 
   // --- 7. Submit Handler ---
-  const handleSubmit = async (e: React.FormEvent) => {
+ const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
 
@@ -336,8 +390,21 @@ export default function FormEnterpriseWedding({ onSubmit, initialData }: FormEnt
         finalMusicUrl = json.url;
       }
 
-      // C. Upload Video MP4 Prewed ke R2 (jika file dipilih)
+      // C. Upload Video MP4 Prewed ke R2 (jika file baru dipilih)
       if (videoFile) {
+        // Hapus file video lama di R2 jika ada
+        if (initialData?.videoPrewedUrl && initialData.videoPrewedUrl.includes(".r2.dev")) {
+          try {
+            await fetch("/api/admin/delete", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ fileUrl: initialData.videoPrewedUrl }),
+            });
+          } catch (err) {
+            console.error("Gagal hapus video lama R2:", err);
+          }
+        }
+
         const vData = new FormData();
         vData.append("file", videoFile);
         vData.append("slug", formData.slug);
@@ -348,7 +415,7 @@ export default function FormEnterpriseWedding({ onSubmit, initialData }: FormEnt
         if (!res.ok || !json.success) throw new Error(json.message || "Gagal upload video prewedding");
         finalVideoUrl = json.url;
       } else {
-        // Jika tidak upload file, gunakan formatter URL YouTube jika berupa link
+        // Jika tidak upload file baru, gunakan formatter URL
         finalVideoUrl = formatEmbedUrl(formData.videoPrewedUrl || "");
       }
 
@@ -366,8 +433,15 @@ export default function FormEnterpriseWedding({ onSubmit, initialData }: FormEnt
         uploadedGalleryUrls.push(json.url);
       }
 
+      // SANITASI STATUS RSVP & WA NOTIFICATION FOONTE
+      const isRsvpActive = Boolean(formData.enableRsvp);
+
       const finalPayload: EnterpriseWeddingContent = {
         ...formData,
+        enableRsvp: isRsvpActive,
+        // Jika enableRsvp false, matikan WaNotification & kosongkan no WA pengantin
+        enableWaNotification: isRsvpActive ? Boolean(formData.enableWaNotification) : false,
+        whatsappPengantin: isRsvpActive ? (formData.whatsappPengantin || "").trim() : "",
         liveStreamUrl: formatEmbedUrl(formData.liveStreamUrl || ""),
         videoPrewedUrl: finalVideoUrl,
         qrisImageUrl: finalQrisUrl,
@@ -412,43 +486,93 @@ export default function FormEnterpriseWedding({ onSubmit, initialData }: FormEnt
         templates={templates}
       />
 
-      {/* KONTAK WHATSAPP & RSVP CONFIG */}
-      <div className="rounded-xl border border-amber-500/35 bg-amber-950/10 p-4 space-y-4">
-        <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider">
-          💬 Kontak WhatsApp & Pengaturan RSVP
-        </h4>
+   {/* KONTAK WHATSAPP & RSVP CONFIG */}
+<div className="rounded-xl border border-amber-500/35 bg-amber-950/10 p-4 space-y-4">
+  <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center gap-2">
+    💬 Pengaturan Buku Tamu & Notifikasi WA
+  </h4>
 
-        <div className="space-y-3">
+  <div className="space-y-4">
+    {/* 1. TOGGLE UTAMA: AKTIFKAN FITUR RSVP & BUKU TAMU */}
+    <div className="flex items-center gap-3">
+      <input
+        type="checkbox"
+        id="enableRsvp"
+        name="enableRsvp"
+        checked={formData.enableRsvp ?? true}
+        onChange={(e) => {
+          const isChecked = e.target.checked;
+          setFormData((prev) => ({
+            ...prev,
+            enableRsvp: isChecked,
+            // Jika RSVP dimatikan, otomatis matikan notif WA & kosongkan nomor HP
+            enableWaNotification: isChecked ? prev.enableWaNotification : false,
+            whatsappPengantin: isChecked ? prev.whatsappPengantin : "",
+          }));
+        }}
+        className="h-4 w-4 rounded border-slate-800 bg-slate-950 text-amber-600 focus:ring-amber-500 cursor-pointer"
+      />
+      <label htmlFor="enableRsvp" className="text-xs font-semibold text-slate-200 cursor-pointer">
+        Aktifkan Fitur Buku Tamu & RSVP di Halaman Undangan
+      </label>
+    </div>
+
+    {/* 2. SUB-OPTION: HANYA MUNCUL JIKA RSVP AKTIF */}
+    {formData.enableRsvp && (
+      <div className="pl-6 border-l-2 border-amber-500/30 space-y-4 transition-all animate-fadeIn">
+        
+        {/* TOGGLE NOTIFIKASI WA (FONNTE) */}
+        <div className="flex items-start gap-3">
+          <input
+            type="checkbox"
+            id="enableWaNotification"
+            name="enableWaNotification"
+            checked={formData.enableWaNotification ?? false}
+            onChange={(e) => {
+              const isChecked = e.target.checked;
+              setFormData((prev) => ({
+                ...prev,
+                enableWaNotification: isChecked,
+                // Jika notif WA dimatikan, bersihkan input nomor HP
+                whatsappPengantin: isChecked ? prev.whatsappPengantin : "",
+              }));
+            }}
+            className="h-4 w-4 rounded border-slate-800 bg-slate-950 text-amber-600 focus:ring-amber-500 mt-0.5 cursor-pointer"
+          />
           <div>
-            <label className="block text-xs font-medium text-slate-300 mb-1">
-              Nomor WhatsApp Pengantin / Admin (Untuk Konfirmasi RSVP)
+            <label htmlFor="enableWaNotification" className="text-xs font-medium text-slate-300 cursor-pointer block">
+              Kirim Notifikasi Otomatis ke WhatsApp via Fonnte
+            </label>
+            <p className="text-[10px] text-slate-500 mt-0.5">
+              Setiap tamu mengisi RSVP, pengantin akan menerima pesan WA otomatis.
+            </p>
+          </div>
+        </div>
+
+        {/* 3. INPUT NOMOR HP: HANYA MUNCUL JIKA NOTIFIKASI WA DIAKTIFKAN */}
+        {formData.enableWaNotification && (
+          <div className="space-y-1 transition-all animate-fadeIn pt-1">
+            <label className="block text-xs font-medium text-amber-200">
+              Nomor WhatsApp Pengantin / Admin *
             </label>
             <input
               type="text"
               name="whatsappPengantin"
               value={formData.whatsappPengantin || ""}
               onChange={handleChange}
-              placeholder="Contoh: 6281234567890 (Awali dengan 62 tanpa tanda +)"
-              className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 focus:border-amber-500 focus:outline-none transition-colors"
+              placeholder="Contoh: 6281234567890 (Awali dengan 62)"
+              className="w-full rounded-lg border border-amber-500/40 bg-slate-950 px-3 py-2 text-xs text-slate-200 focus:border-amber-400 focus:outline-none transition-colors"
             />
-            <p className="text-[10px] text-slate-500 mt-1">Digunakan tamu untuk mengirim konfirmasi kehadiran (RSVP) langsung via WhatsApp.</p>
+            <p className="text-[10px] text-slate-400">
+              Pastikan nomor diawali kode negara <b>62</b> tanpa tanda + atau angka 0 di depan.
+            </p>
           </div>
-
-          <div className="flex items-center gap-3 pt-1">
-            <input
-              type="checkbox"
-              id="enableRsvp"
-              name="enableRsvp"
-              checked={formData.enableRsvp ?? true}
-              onChange={handleChange}
-              className="h-4 w-4 rounded border-slate-800 bg-slate-950 text-amber-600 focus:ring-amber-500"
-            />
-            <label htmlFor="enableRsvp" className="text-xs font-medium text-slate-300 cursor-pointer">
-              Aktifkan Fitur Buku Tamu & RSVP di Halaman Undangan
-            </label>
-          </div>
-        </div>
+        )}
       </div>
+    )}
+  </div>
+</div>
+
 
       {/* Media & Live Streaming */}
       <div className="rounded-xl border border-amber-500/35 bg-amber-950/10 p-4 space-y-4">
@@ -477,7 +601,7 @@ export default function FormEnterpriseWedding({ onSubmit, initialData }: FormEnt
               Video Prewedding / Teaser (Upload MP4 ke R2 atau Link YouTube)
             </label>
             
-            <div className="space-y-2">
+            <div className="space-y-3">
               <input
                 type="text"
                 name="videoPrewedUrl"
@@ -489,7 +613,7 @@ export default function FormEnterpriseWedding({ onSubmit, initialData }: FormEnt
 
               <div className="flex items-center gap-4">
                 <label className="px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer bg-amber-600 text-slate-950 hover:bg-amber-500 transition-all shadow-sm">
-                  {videoFileName ? "Ganti File Video MP4" : "Upload Video MP4 ke R2"}
+                  {formData.videoPrewedUrl || videoFileName ? "Ganti File Video MP4" : "Upload Video MP4 ke R2"}
                   <input
                     type="file"
                     accept="video/mp4,video/webm"
@@ -501,6 +625,38 @@ export default function FormEnterpriseWedding({ onSubmit, initialData }: FormEnt
                   {videoFileName || (formData.videoPrewedUrl ? "Video terpasang" : "Belum ada file video dipilih")}
                 </span>
               </div>
+
+              {/* CARD PREVIEW VIDEO + TOMBOL HAPUS */}
+              {formData.videoPrewedUrl && (
+                <div className="relative mt-2 max-w-sm rounded-xl bg-slate-950 border border-slate-800 p-2 shadow-lg overflow-hidden group">
+                  {formData.videoPrewedUrl.includes(".r2.dev") ||
+                  formData.videoPrewedUrl.includes(".mp4") ||
+                  formData.videoPrewedUrl.startsWith("blob:") ? (
+                    <video
+                      key={formData.videoPrewedUrl}
+                      src={formData.videoPrewedUrl}
+                      controls
+                      playsInline
+                      preload="metadata"
+                      className="w-full h-44 rounded-lg object-cover bg-black"
+                    />
+                  ) : (
+                    <div className="w-full h-44 rounded-lg bg-slate-900 flex items-center justify-center text-xs text-slate-400 p-2 text-center border border-slate-800">
+                      🎬 Link Video YouTube Embed Terpasang
+                    </div>
+                  )}
+
+                  {/* Tombol Hapus Merah (✕) */}
+                  <button
+                    type="button"
+                    onClick={removeVideo}
+                    className="absolute top-3 right-3 bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold shadow-md hover:bg-red-500 transition-colors z-10"
+                    title="Hapus Video dari R2"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>

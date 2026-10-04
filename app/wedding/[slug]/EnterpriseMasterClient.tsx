@@ -1,13 +1,14 @@
 "use client";
 
-import React, { useState, useRef, useEffect, useMemo } from "react";
-// Import semua style Tailwind yang diisolasi di file terpisah
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import * as styles from "./EnterpriseMasterClient.module";
 
 // ==========================================
 // INTERFACES & TYPES
 // ==========================================
 export interface Invitation {
+  id?: string;
+  invitation_id?: string;
   package?: string;
   nama_panggilan_wanita?: string;
   namaPanggilanWanita?: string;
@@ -44,9 +45,11 @@ export interface Rekening {
 }
 
 export interface LoveStory {
-  tahun_atau_tanggal: string;
+  tahun_atau_tanggal?: string;
+  tahun?: string;
   judul: string;
-  cerita: string;
+  cerita?: string;
+  deskripsi?: string;
 }
 
 export interface XtraData {
@@ -59,8 +62,15 @@ export interface XtraData {
   rekeningBank?: Rekening[];
   liveStreamUrl?: string;
   videoTeaserUrl?: string;
+  videoPrewedUrl?: string;
   loveStoryList?: LoveStory[];
+  loveStory?: LoveStory[];
   alamatKadoFisik?: string;
+  noHpPengantin?: string;
+  noHp?: string;
+  whatsappPengantin?: string;
+  enableRsvp?: boolean;
+  enableWaNotification?: boolean;
 }
 
 interface EnterpriseMasterClientProps {
@@ -68,21 +78,31 @@ interface EnterpriseMasterClientProps {
   xtraData?: XtraData;
 }
 
+interface RsvpItem {
+  id: string;
+  nama: string;
+  kehadiran: string;
+  pesan: string;
+  created_at?: string;
+}
+
 // ==========================================
-// HELPER FUNCTIONS FOR VIDEO PARSING
+// HELPER FUNCTIONS FOR VIDEO & AUDIO FORMAT
 // ==========================================
 function getEmbedVideoUrl(url: string | undefined): string {
   if (!url) return "";
 
-  const ytRegExp =
-    /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=|shorts\/)|youtu\.be\/)([^"&?\/\s]{11})/;
+  if (url.includes("youtube.com/embed/")) {
+    return url;
+  }
+
+  const ytRegExp = /(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/;
   const ytMatch = url.match(ytRegExp);
   if (ytMatch && ytMatch[1]) {
     return `https://www.youtube.com/embed/${ytMatch[1]}?autoplay=0&rel=0`;
   }
 
-  const vimeoRegExp =
-    /(?:vimeo\.com\/(?:channels\/(?:\w+\/)?|groups\/([^\/]*)\/videos\/|album\/(\d+)\/video\/|video\/|)(\d+)|player\.vimeo\.com\/video\/(\d+))/;
+  const vimeoRegExp = /(?:vimeo\.com\/(?:channels\/(?:\w+\/)?|groups\/([^\/]*)\/videos\/|album\/(\d+)\/video\/|video\/|)(\d+)|player\.vimeo\.com\/video\/(\d+))/;
   const vimeoMatch = url.match(vimeoRegExp);
   const vimeoId = vimeoMatch ? vimeoMatch[3] || vimeoMatch[4] : null;
   if (vimeoId) {
@@ -90,6 +110,15 @@ function getEmbedVideoUrl(url: string | undefined): string {
   }
 
   return url;
+}
+
+function formatMusicFilename(filename: string): string {
+  if (!filename) return "le-onde.mp3";
+  let clean = filename.trim().replace(/\s+/g, "-");
+  if (clean === "preset" || clean === "preset.mp3") {
+    return "le-onde.mp3";
+  }
+  return clean.endsWith(".mp3") ? clean : `${clean}.mp3`;
 }
 
 // ==========================================
@@ -103,14 +132,20 @@ export default function EnterpriseMasterClient({
     return (
       <div className={styles.masterLayoutStyles.loadingWrapper}>
         <div className={styles.masterLayoutStyles.spinner}></div>
-        <p className={styles.masterLayoutStyles.loadingText}>Memuat data undangan...</p>
+        <p className={styles.masterLayoutStyles.loadingText}>
+          Memuat data undangan...
+        </p>
       </div>
     );
   }
 
-  const pkg = (invitation.package || "basic").toLowerCase();
+  const pkg = (invitation?.package || "basic").toLowerCase();
   const isBasic = pkg === "basic";
-  const isEnterprise = pkg === "enterprise" || pkg === "exclusive";
+  const isEnterprise = pkg === "enterprise" || pkg === "exclusive" || pkg === "pro";
+
+  // Flag Kondisional Fitur dari XtraData
+  const isRsvpActive = Boolean(xtraData?.enableRsvp ?? true);
+  const isWaNotifActive = isRsvpActive ? Boolean(xtraData?.enableWaNotification ?? false) : false;
 
   // State Management
   const [isOpen, setIsOpen] = useState<boolean>(isBasic);
@@ -126,7 +161,6 @@ export default function EnterpriseMasterClient({
   });
 
   // RSVP Form State
-  // RSVP Form State
   const [namaTamu, setNamaTamu] = useState<string>("");
   const [jumlahOrang, setJumlahOrang] = useState<string>("1");
   const [statusKehadiran, setStatusKehadiran] = useState<
@@ -135,63 +169,144 @@ export default function EnterpriseMasterClient({
   const [pesanTamu, setPesanTamu] = useState<string>("");
   const [isSubmittingRsvp, setIsSubmittingRsvp] = useState<boolean>(false);
   const [rsvpSuccess, setRsvpSuccess] = useState<boolean>(false);
-  
-  // TAMBAHKAN STATE INI:
   const [rsvpError, setRsvpError] = useState<string | null>(null);
-  const [showRsvpForm, setShowRsvpForm] = useState<boolean>(false);
-
+  const [rsvpList, setRsvpList] = useState<RsvpItem[]>([]);
+  const [isLoadingRsvp, setIsLoadingRsvp] = useState<boolean>(true);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   // Config domain R2 Cloudflare
-  const R2_DOMAIN =
-    process.env.NEXT_PUBLIC_R2_PUBLIC_DOMAIN ||
-    "https://pub-e68afb656e1047c18ea6018f93d09ddc.r2.dev";
+  const rawR2Domain = process.env.NEXT_PUBLIC_R2_PUBLIC_DOMAIN?.trim();
+  const R2_DOMAIN = useMemo(() => {
+    return rawR2Domain && rawR2Domain !== "" && rawR2Domain !== "/"
+      ? rawR2Domain.replace(/\/+$/, "")
+      : "https://assets.zpack.my.id";
+  }, [rawR2Domain]);
 
-  // Formatter nama file & fallback jika terisi 'preset'
-  const formatMusicFilename = (filename: string) => {
-    if (!filename) return "le-onde.mp3";
-    let clean = filename.trim().replace(/\s+/g, "-");
-    
-    if (clean === "preset" || clean === "preset.mp3") {
-      return "le-onde.mp3";
+  // HELPER PENGAMBILAN GAMBAR UNTUK GALERI & QRIS
+  const getImageUrl = useCallback((urlStr: string | undefined): string => {
+    if (!urlStr) return "";
+    let cleanStr = urlStr.trim();
+
+    // 1. Bersihkan prefix 'invitations/' jika ada
+    cleanStr = cleanStr.replace(/^(\/?invitations\/)+/, "");
+
+    // 2. Jika di database tersimpan URL lama, ganti domainnya ke R2_DOMAIN
+    if (cleanStr.includes(".r2.dev") || cleanStr.startsWith("https://zpack.my.id/")) {
+      cleanStr = cleanStr.replace(/^https?:\/\/[^\/]+/, R2_DOMAIN);
     }
 
-    return clean.endsWith(".mp3") ? clean : `${clean}.mp3`;
-  };
+    // 3. Jika sudah merupakan URL lengkap https://...
+    if (cleanStr.startsWith("http://") || cleanStr.startsWith("https://")) {
+      return cleanStr;
+    }
 
-  // Menentukan sumber audio
+    // 4. Jika hanya path relatif
+    const pathWithoutLeadingSlash = cleanStr.replace(/^\/+/, "");
+    return `${R2_DOMAIN}/${pathWithoutLeadingSlash}`;
+  }, [R2_DOMAIN]);
+
+  const activeInvitationId = invitation?.id || invitation?.invitation_id;
+
+  const fetchRsvpList = useCallback(async () => {
+    if (!activeInvitationId || !isRsvpActive) return;
+    try {
+      const res = await fetch(`/api/rsvp?invitationId=${activeInvitationId}`);
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) {
+        setRsvpList(json.data);
+      }
+    } catch (err) {
+      console.error("Gagal mengambil daftar ucapan:", err);
+    } finally {
+      setIsLoadingRsvp(false);
+    }
+  }, [activeInvitationId, isRsvpActive]);
+
+  useEffect(() => {
+    if (isRsvpActive) {
+      fetchRsvpList();
+    }
+  }, [fetchRsvpList, isRsvpActive]);
+
+  // AUDIO SOURCE MANAGER
   const audioSource = useMemo(() => {
-    if (xtraData?.customMusicUrl && xtraData.customMusicUrl.trim() !== "") {
-      return xtraData.customMusicUrl.trim();
+    const cleanAudioPath = (rawStr: string): string => {
+      let clean = rawStr.trim();
+
+      // 1. Bersihkan prefix 'invitations/' jika ada
+      clean = clean.replace(/^(\/?invitations\/)+/, "");
+
+      // 2. Jika pakai domain r2.dev lama atau zpack.my.id lama, ganti ke R2_DOMAIN
+      if (clean.includes(".r2.dev") || clean.startsWith("https://zpack.my.id/")) {
+        clean = clean.replace(/^https?:\/\/[^\/]+/, R2_DOMAIN);
+      }
+
+      // 3. Jika sudah berupa URL lengkap http/https
+      if (clean.startsWith("http://") || clean.startsWith("https://")) {
+        return clean;
+      }
+
+      // 4. Hilangkan leading slash di awal path
+      const pathWithoutSlash = clean.replace(/^\/+/, "");
+
+      // Jika berupa preset-music/
+      if (pathWithoutSlash.startsWith("preset-music/")) {
+        const fileName = pathWithoutSlash.replace(/^preset-music\//, "");
+        return `${R2_DOMAIN}/preset-music/${formatMusicFilename(fileName)}`;
+      }
+
+      return `${R2_DOMAIN}/${pathWithoutSlash}`;
+    };
+
+    // A. Custom music dari xtraData
+    let customUrl = xtraData?.customMusicUrl;
+    if (customUrl && typeof customUrl === "string" && customUrl.trim() !== "") {
+      return cleanAudioPath(customUrl);
     }
 
+    // B. Preset music option dari xtraData
     if (
       xtraData?.musicOption &&
+      typeof xtraData.musicOption === "string" &&
       xtraData.musicOption.trim() !== "" &&
       xtraData.musicOption.toLowerCase() !== "none"
     ) {
       const option = xtraData.musicOption.trim();
 
-      if (option.startsWith("http://") || option.startsWith("https://")) {
-        return option;
+      if (option.includes("/") || option.startsWith("http")) {
+        return cleanAudioPath(option);
       }
 
-      const filename = formatMusicFilename(option);
-      return `${R2_DOMAIN}/preset-music/${filename}`;
+      const formattedFile = formatMusicFilename(option);
+      return `${R2_DOMAIN}/preset-music/${formattedFile}`;
     }
 
-    return null;
+    // C. Fallback default
+    return `${R2_DOMAIN}/preset-music/le-onde.mp3`;
   }, [xtraData, R2_DOMAIN]);
 
-  // Fallback data rekening & QRIS dari props xtraData
+  // Debug log untuk membantu melacak URL Audio di Console Browser
+  useEffect(() => {
+    if (audioSource) {
+      console.log("🔊 Audio Target URL:", audioSource);
+    }
+  }, [audioSource]);
+
+  // Fallback data
   const rekeningListActual = xtraData?.rekeningBank || xtraData?.rekeningList || [];
-  const qrisUrlActual = xtraData?.qrisImageUrl || xtraData?.qrisUrl;
+  const qrisUrlActual = getImageUrl(xtraData?.qrisImageUrl || xtraData?.qrisUrl);
+  const galeriFotoList = useMemo(() => {
+    return (xtraData?.galeriFoto || []).map((imgUrl) => getImageUrl(imgUrl));
+  }, [xtraData?.galeriFoto, getImageUrl]);
+  const loveStoryListActual = xtraData?.loveStory || xtraData?.loveStoryList || [];
 
   // Countdown Effect
   useEffect(() => {
     const targetDateStr =
       invitation.tanggal_akad ||
       invitation.tanggalAkad ||
+      invitation.tanggal_resepsi ||
+      invitation.tanggalResepsi ||
       "2026-12-31T08:00:00";
     const targetTime = new Date(targetDateStr).getTime();
 
@@ -203,7 +318,7 @@ export default function EnterpriseMasterClient({
         setTimeLeft({
           days: Math.floor(difference / (1000 * 60 * 60 * 24)),
           hours: Math.floor((difference / (1000 * 60 * 60)) % 24),
-          minutes: Math.floor((difference / 1000 / 60) % 60),
+          minutes: Math.floor((difference / (1000 * 60)) % 60),
           seconds: Math.floor((difference / 1000) % 60),
         });
       } else {
@@ -217,7 +332,6 @@ export default function EnterpriseMasterClient({
     return () => clearInterval(interval);
   }, [invitation]);
 
-  // Lock scroll body saat modal cover aktif
   useEffect(() => {
     if (!isOpen && !isBasic) {
       document.body.style.overflow = "hidden";
@@ -229,7 +343,6 @@ export default function EnterpriseMasterClient({
     };
   }, [isOpen, isBasic]);
 
-  // Handler pemutaran audio
   const playAudioSafe = async () => {
     if (!audioRef.current || !audioSource) return;
 
@@ -238,7 +351,7 @@ export default function EnterpriseMasterClient({
       await audioRef.current.play();
       setIsPlaying(true);
     } catch (err) {
-      console.warn("Autoplay terhalang browser / media belum siap:", err);
+      console.warn("Autoplay/Play terhalang oleh browser atau gagal dimuat:", err);
       setIsPlaying(false);
     }
   };
@@ -268,18 +381,18 @@ export default function EnterpriseMasterClient({
     }
   };
 
- const handleRsvpSubmit = async (e: React.FormEvent) => {
+  const handleRsvpSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!namaTamu.trim()) return;
 
     setIsSubmittingRsvp(true);
     setRsvpError(null);
 
-    // Ambil ID Undangan (Cek dari invitation.id atau invitation_id)
-    const activeInvitationId = (invitation as any)?.id || (invitation as any)?.invitation_id || "default-id";
-
-    // Ambil Nomor WA Pengantin dari xtraData
-    const targetNoHp = (xtraData as any)?.noHpPengantin || (xtraData as any)?.noHp || (xtraData as any)?.whatsappPengantin || "";
+    const targetWaNumber =
+      xtraData?.whatsappPengantin ||
+      xtraData?.noHpPengantin ||
+      xtraData?.noHp ||
+      "";
 
     try {
       const response = await fetch("/api/rsvp", {
@@ -288,29 +401,45 @@ export default function EnterpriseMasterClient({
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          invitationId: activeInvitationId, // Sesuai dengan body API
+          invitationId: activeInvitationId,
           nama: namaTamu,
           kehadiran: statusKehadiran,
           pesan: pesanTamu,
-          noHpPengantin: targetNoHp, // Dikirim ke Fonnte
+          jumlahOrang: jumlahOrang,
+          enableWaNotification: isWaNotifActive,
+          whatsappPengantin: targetWaNumber,
         }),
       });
 
-      const result = await response.json();
-
-      if (!response.ok || !result.success) {
-        throw new Error(result.message || "Gagal menyimpan konfirmasi.");
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || "Gagal menyimpan konfirmasi.");
       }
 
       setRsvpSuccess(true);
+
+      const newRsvpItem: RsvpItem = {
+        id: Date.now().toString(),
+        nama: namaTamu,
+        kehadiran: statusKehadiran,
+        pesan: pesanTamu || "-",
+        created_at: new Date().toISOString(),
+      };
+
+      setRsvpList((prev) => [newRsvpItem, ...prev]);
+
+      if (typeof fetchRsvpList === "function") {
+        fetchRsvpList();
+      }
+
       setNamaTamu("");
       setPesanTamu("");
+      setJumlahOrang("1");
       setStatusKehadiran("Hadir");
 
       setTimeout(() => {
         setRsvpSuccess(false);
-        setShowRsvpForm(false);
-      }, 3000);
+      }, 4000);
     } catch (err: any) {
       console.error("Gagal RSVP:", err);
       setRsvpError(err.message || "Gagal mengirim data ke server.");
@@ -318,6 +447,10 @@ export default function EnterpriseMasterClient({
       setIsSubmittingRsvp(false);
     }
   };
+
+  
+
+  // Jangan lupa sertakan <audio ref={audioRef} src={audioSource} /> di dalam JSX return komponen kamu nantinya.
 
   return (
     <div className={styles.masterLayoutStyles.pageWrapper}>
@@ -356,9 +489,7 @@ export default function EnterpriseMasterClient({
         </button>
       )}
 
-      {/* ========================================================= */}
-      {/* COVER / POPUP OVERLAY                                     */}
-      {/* ========================================================= */}
+      {/* COVER / POPUP OVERLAY */}
       {!isOpen && !isBasic && (
         <div className={styles.coverOverlayStyles.overlay}>
           <div className={styles.coverOverlayStyles.wrapper}>
@@ -401,9 +532,7 @@ export default function EnterpriseMasterClient({
         </div>
       )}
 
-      {/* ========================================================= */}
-      {/* KONTEN UTAMA UNDANGAN                                     */}
-      {/* ========================================================= */}
+      {/* KONTEN UTAMA UNDANGAN */}
       <div
         className={`${styles.masterLayoutStyles.mainContent} ${
           isOpen ? "opacity-100 block" : "opacity-0 hidden"
@@ -421,9 +550,7 @@ export default function EnterpriseMasterClient({
             </p>
           </div>
 
-          {/* Nama Mempelai */}
           <div className={styles.headerStyles.mempelaiWrapper}>
-            {/* Mempelai Wanita */}
             <div className={styles.headerStyles.mempelaiBlock}>
               <h1 className={styles.headerStyles.namaText}>
                 {invitation.nama_lengkap_wanita ||
@@ -442,7 +569,6 @@ export default function EnterpriseMasterClient({
 
             <div className={styles.headerStyles.divider}>&</div>
 
-            {/* Mempelai Pria */}
             <div className={styles.headerStyles.mempelaiBlock}>
               <h1 className={styles.headerStyles.namaText}>
                 {invitation.nama_lengkap_pria ||
@@ -460,7 +586,6 @@ export default function EnterpriseMasterClient({
             </div>
           </div>
 
-          {/* Ayat / Kutipan */}
           <div className={styles.headerStyles.ayatWrapper}>
             <p className={styles.headerStyles.ayatText}>
               &ldquo;Dan di antara tanda-tanda kekuasaan-Nya ialah Dia menciptakan
@@ -477,7 +602,6 @@ export default function EnterpriseMasterClient({
           <h3 className={styles.eventStyles.title}>Detail Acara</h3>
 
           <div className={styles.eventStyles.grid}>
-            {/* Akad Nikah */}
             <div className={styles.eventStyles.card}>
               <span className={styles.eventStyles.label}>Akad Nikah</span>
               <p className={styles.eventStyles.date}>
@@ -493,7 +617,6 @@ export default function EnterpriseMasterClient({
               </p>
             </div>
 
-            {/* Resepsi */}
             <div className={styles.eventStyles.card}>
               <span className={styles.eventStyles.label}>Resepsi</span>
               <p className={styles.eventStyles.date}>
@@ -573,41 +696,39 @@ export default function EnterpriseMasterClient({
           )}
         </section>
 
-        {/* 5. LOVE STORY (Opsional) */}
-        {isEnterprise &&
-          xtraData?.loveStoryList &&
-          xtraData.loveStoryList.length > 0 && (
-            <section className={styles.loveStoryStyles.section}>
-              <h3 className={styles.loveStoryStyles.title}>Love Story</h3>
+        {/* 5. LOVE STORY */}
+        {isEnterprise && loveStoryListActual.length > 0 && (
+          <section className={styles.loveStoryStyles.section}>
+            <h3 className={styles.loveStoryStyles.title}>Love Story</h3>
 
-              <div className={styles.loveStoryStyles.timelineContainer}>
-                {xtraData.loveStoryList.map((story, idx) => (
-                  <div key={idx} className={styles.loveStoryStyles.item}>
-                    <div className={styles.loveStoryStyles.dot} />
-                    <span className={styles.loveStoryStyles.year}>
-                      {story.tahun_atau_tanggal}
-                    </span>
-                    <h4 className={styles.loveStoryStyles.heading}>
-                      {story.judul}
-                    </h4>
-                    <p className={styles.loveStoryStyles.story}>
-                      {story.cerita}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
+            <div className={styles.loveStoryStyles.timelineContainer}>
+              {loveStoryListActual.map((story, idx) => (
+                <div key={idx} className={styles.loveStoryStyles.item}>
+                  <div className={styles.loveStoryStyles.dot} />
+                  <span className={styles.loveStoryStyles.year}>
+                    {story.tahun_atau_tanggal || story.tahun}
+                  </span>
+                  <h4 className={styles.loveStoryStyles.heading}>
+                    {story.judul}
+                  </h4>
+                  <p className={styles.loveStoryStyles.story}>
+                    {story.cerita || story.deskripsi}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
-        {/* 6. GALERI FOTO */}
-        {!isBasic && xtraData?.galeriFoto && xtraData.galeriFoto.length > 0 && (
+        {/* 6. GALERI FOTO (FIXED WITH getImageUrl) */}
+        {!isBasic && galeriFotoList.length > 0 && (
           <section className={styles.galleryStyles.section}>
             <h3 className={styles.galleryStyles.title}>Galeri Foto</h3>
             <div className={styles.galleryStyles.grid}>
-              {xtraData.galeriFoto.map((imgUrl, idx) => (
+              {galeriFotoList.map((imgUrl, idx) => (
                 <div key={idx} className={styles.galleryStyles.imageCard}>
                   <img
-                    src={imgUrl}
+                    src={getImageUrl(imgUrl)}
                     alt={`Galeri foto ${idx + 1}`}
                     className={styles.galleryStyles.image}
                   />
@@ -617,13 +738,13 @@ export default function EnterpriseMasterClient({
           </section>
         )}
 
-        {/* Video Teaser (Opsional) */}
-        {isEnterprise && xtraData?.videoTeaserUrl && (
-          <section className="space-y-6 text-center">
+        {/* Video Teaser */}
+        {isEnterprise && (xtraData?.videoTeaserUrl || xtraData?.videoPrewedUrl) && (
+          <section className="space-y-6 text-center my-8">
             <h3 className={styles.galleryStyles.title}>Video Prewedding</h3>
             <div className={styles.galleryStyles.videoContainer}>
               <iframe
-                src={getEmbedVideoUrl(xtraData.videoTeaserUrl)}
+                src={getEmbedVideoUrl(xtraData.videoTeaserUrl || xtraData.videoPrewedUrl)}
                 className={styles.galleryStyles.iframe}
                 allow="autoplay; fullscreen; picture-in-picture"
                 allowFullScreen
@@ -645,7 +766,6 @@ export default function EnterpriseMasterClient({
             </div>
 
             <div className={styles.giftStyles.container}>
-              {/* Rekening Bank & E-Wallet */}
               {rekeningListActual.map((rek, idx) => {
                 const nomorRekening = rek.norek || rek.noRek || "";
                 const atasNama = rek.atas_nama || rek.atasNama || "";
@@ -669,7 +789,6 @@ export default function EnterpriseMasterClient({
                 );
               })}
 
-              {/* QRIS */}
               {qrisUrlActual && (
                 <div className={styles.giftStyles.qrisWrapper}>
                   <p className={styles.giftStyles.qrisLabel}>QRIS Pembayaran</p>
@@ -681,7 +800,6 @@ export default function EnterpriseMasterClient({
                 </div>
               )}
 
-              {/* Alamat Kado Fisik */}
               {xtraData?.alamatKadoFisik && (
                 <div className={styles.giftStyles.addressCard}>
                   <p className={styles.giftStyles.addressLabel}>
@@ -696,109 +814,158 @@ export default function EnterpriseMasterClient({
           </section>
         )}
 
-        {/* 8. RSVP */}
-        {isEnterprise && (
-          <section className={styles.rsvpStyles.section}>
-            <div className={styles.rsvpStyles.headerWrapper}>
-              <h3 className={styles.rsvpStyles.title}>
-                Konfirmasi Kehadiran (RSVP)
-              </h3>
-              <p className={styles.rsvpStyles.description}>
-                Mohon konfirmasikan kehadiran Anda untuk membantu persiapan acara.
-              </p>
-            </div>
-
-            <form onSubmit={handleRsvpSubmit} className={styles.rsvpStyles.form}>
-              <div>
-                <label className={styles.rsvpStyles.label}>
-                  Nama Tamu / Rombongan
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={namaTamu}
-                  onChange={(e) => setNamaTamu(e.target.value)}
-                  placeholder="Masukkan nama Anda"
-                  className={styles.rsvpStyles.input}
-                />
-              </div>
-
-              <div className={styles.rsvpStyles.gridTwoCol}>
-                <div>
-                  <label className={styles.rsvpStyles.label}>
-                    Jumlah Orang
-                  </label>
-                  <select
-                    value={jumlahOrang}
-                    onChange={(e) => setJumlahOrang(e.target.value)}
-                    className={styles.rsvpStyles.select}
-                  >
-                    <option value="1">1 Orang</option>
-                    <option value="2">2 Orang</option>
-                    <option value="3">3 Orang</option>
-                    <option value="4+">Lebih dari 3</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className={styles.rsvpStyles.label}>
-                    Konfirmasi Kehadiran
-                  </label>
-                  <select
-                    value={statusKehadiran}
-                    onChange={(e) =>
-                      setStatusKehadiran(
-                        e.target.value as "Hadir" | "Tidak Hadir" | "Ragu-ragu"
-                      )
-                    }
-                    className={styles.rsvpStyles.select}
-                  >
-                    <option value="Hadir">Hadir</option>
-                    <option value="Tidak Hadir">Tidak Hadir</option>
-                    <option value="Ragu-ragu">Ragu-ragu</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className={styles.rsvpStyles.label}>
-                  Pesan / Ucapan Singkat (Opsional)
-                </label>
-                <textarea
-                  rows={2}
-                  value={pesanTamu}
-                  onChange={(e) => setPesanTamu(e.target.value)}
-                  placeholder="Tulis ucapan selamat..."
-                  className={styles.rsvpStyles.textarea}
-                ></textarea>
-              </div>
-
-              <button
-                type="submit"
-                disabled={isSubmittingRsvp}
-                className={styles.rsvpStyles.button}
-              >
-                {isSubmittingRsvp ? "Mengirim..." : "Kirim Konfirmasi"}
-              </button>
-
-              {rsvpSuccess && (
-                <p className={styles.rsvpStyles.successText}>
-                  ✓ Terima kasih! Konfirmasi Anda telah berhasil dikirim.
+        {/* 8. SECTION RSVP & BUKU UCAPAN */}
+        {isRsvpActive && (
+          <React.Fragment>
+            <section className={styles.rsvpStyles.section}>
+              <div className={styles.rsvpStyles.headerWrapper}>
+                <h3 className={styles.rsvpStyles.title}>
+                  Konfirmasi Kehadiran (RSVP)
+                </h3>
+                <p className={styles.rsvpStyles.description}>
+                  Mohon konfirmasikan kehadiran Anda untuk membantu persiapan acara.
                 </p>
-              )}
-            </form>
-          </section>
-        )}
+              </div>
 
-        {/* 9. FOOTER */}
-        <footer className="text-center space-y-4 pt-12 border-t border-slate-900 text-slate-500">
-          <p className="text-xs">
-            Merupakan suatu kehormatan dan kebahagiaan bagi kami apabila Bapak/Ibu/Saudara/i berkenan hadir.
-          </p>
-          <p className="text-[10px] uppercase tracking-widest">
-            © {new Date().getFullYear()} Zpack Digital Wedding Invitation
-          </p>
-        </footer>
+              <form onSubmit={handleRsvpSubmit} className={styles.rsvpStyles.form}>
+                <div>
+                  <label className={styles.rsvpStyles.label}>
+                    Nama Tamu / Rombongan
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={namaTamu}
+                    onChange={(e) => setNamaTamu(e.target.value)}
+                    placeholder="Masukkan nama Anda"
+                    className={styles.rsvpStyles.input}
+                  />
+                </div>
+
+                <div className={styles.rsvpStyles.gridTwoCol}>
+                  <div>
+                    <label className={styles.rsvpStyles.label}>
+                      Jumlah Orang
+                    </label>
+                    <select
+                      value={jumlahOrang}
+                      onChange={(e) => setJumlahOrang(e.target.value)}
+                      className={styles.rsvpStyles.select}
+                    >
+                      <option value="1">1 Orang</option>
+                      <option value="2">2 Orang</option>
+                      <option value="3">3 Orang</option>
+                      <option value="4+">Lebih dari 3</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className={styles.rsvpStyles.label}>
+                      Konfirmasi Kehadiran
+                    </label>
+                    <select
+                      value={statusKehadiran}
+                      onChange={(e) =>
+                        setStatusKehadiran(
+                          e.target.value as "Hadir" | "Tidak Hadir" | "Ragu-ragu"
+                        )
+                      }
+                      className={styles.rsvpStyles.select}
+                    >
+                      <option value="Hadir">Hadir</option>
+                      <option value="Tidak Hadir">Tidak Hadir</option>
+                      <option value="Ragu-ragu">Ragu-ragu</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className={styles.rsvpStyles.label}>
+                    Pesan / Ucapan Singkat (Opsional)
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={pesanTamu}
+                    onChange={(e) => setPesanTamu(e.target.value)}
+                    placeholder="Tulis ucapan selamat..."
+                    className={styles.rsvpStyles.textarea}
+                  ></textarea>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isSubmittingRsvp}
+                  className={styles.rsvpStyles.button}
+                >
+                  {isSubmittingRsvp ? "Mengirim..." : "Kirim Konfirmasi"}
+                </button>
+
+                {rsvpError && (
+                  <p className="text-red-400 text-sm mt-2 text-center">
+                    {rsvpError}
+                  </p>
+                )}
+
+                {rsvpSuccess && (
+                  <p className={styles.rsvpStyles.successText}>
+                    ✓ Terima kasih! Konfirmasi Anda telah berhasil dikirim.
+                  </p>
+                )}
+              </form>
+            </section>
+
+            {/* BUKU UCAPAN (SCROLLABLE BOX) */}
+            <div className="mt-8 w-full max-w-lg mx-auto bg-slate-900/60 backdrop-blur-md border border-slate-800 rounded-xl p-5 shadow-xl">
+              <div className="flex items-center justify-between mb-4 border-b border-slate-800 pb-3">
+                <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                  💬 Ucapan & Doa
+                </h3>
+                <span className="text-xs text-slate-400 bg-slate-800 px-2.5 py-1 rounded-full">
+                  {rsvpList.length} Pesan
+                </span>
+              </div>
+
+              <div className="max-h-[350px] overflow-y-auto pr-2 space-y-3 custom-scrollbar">
+                {isLoadingRsvp ? (
+                  <p className="text-center text-sm text-slate-400 py-6">
+                    Memuat ucapan...
+                  </p>
+                ) : rsvpList.length === 0 ? (
+                  <p className="text-center text-sm text-slate-400 py-6">
+                    Belum ada ucapan. Jadilah yang pertama memberikan doa!
+                  </p>
+                ) : (
+                  rsvpList.map((item) => (
+                    <div
+                      key={item.id}
+                      className="bg-slate-800/50 border border-slate-700/50 p-3.5 rounded-lg text-left"
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-medium text-slate-200 text-sm">
+                          {item.nama}
+                        </span>
+                        <span
+                          className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                            item.kehadiran === "Hadir"
+                              ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                              : item.kehadiran === "Tidak Hadir"
+                              ? "bg-rose-500/10 text-rose-400 border border-rose-500/20"
+                              : "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                          }`}
+                        >
+                          {item.kehadiran}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                        {item.pesan}
+                      </p>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </React.Fragment>
+        )}
       </div>
     </div>
   );

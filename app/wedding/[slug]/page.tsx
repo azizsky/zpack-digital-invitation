@@ -35,6 +35,27 @@ async function getInvitationBySlug(slug: string) {
   }
 }
 
+// HELPER UNTUK MEMPERBAIKI PATH R2/IMAGE RELATIF
+function fixR2Path(pathStr: string | undefined): string {
+  if (!pathStr) return "";
+  let clean = pathStr.trim();
+
+  // Jika sudah berupa URL lengkap (http/https), biarkan
+  if (clean.startsWith("http://") || clean.startsWith("https://")) {
+    return clean;
+  }
+
+  // Bersihkan leading slash
+  clean = clean.replace(/^\/+/, "");
+
+  // Jika path belum diawali 'invitations/' dan bukan 'preset-music/', tambahkan 'invitations/'
+  if (!clean.startsWith("invitations/") && !clean.startsWith("preset-music/")) {
+    clean = `invitations/${clean}`;
+  }
+
+  return clean;
+}
+
 export default async function PublicInvitationPage({
   params,
 }: {
@@ -56,13 +77,11 @@ export default async function PublicInvitationPage({
 
   // Default fallback struktur xtraData
   let xtraData = {
-    // Premium & Enterprise Common
     musicOption: "none",
     customMusicUrl: "",
     galeriFoto: [] as string[],
     qrisUrl: "",
     rekeningList: [] as { bank: string; norek: string; atas_nama: string }[],
-    // Enterprise Specific
     liveStreamUrl: "",
     videoTeaserUrl: "",
     loveStoryList: [] as { tahun_atau_tanggal: string; judul: string; cerita: string }[],
@@ -70,20 +89,29 @@ export default async function PublicInvitationPage({
 
   try {
     if (invitation.xtra_data) {
-      const parsed = typeof invitation.xtra_data === "string" 
-        ? JSON.parse(invitation.xtra_data) 
-        : invitation.xtra_data;
+      const parsed =
+        typeof invitation.xtra_data === "string"
+          ? JSON.parse(invitation.xtra_data)
+          : invitation.xtra_data;
 
-      // Map data dengan normalisasi kunci agar kompatibel baik camelCase maupun snake_case
+      const rawGaleri = Array.isArray(parsed.galeriFoto)
+        ? parsed.galeriFoto
+        : Array.isArray(parsed.galeri_foto)
+        ? parsed.galeri_foto
+        : [];
+
+      const rawQris =
+        parsed.qrisUrl || parsed.qrisImageUrl || parsed.qris_url || "";
+
+      const rawMusic =
+        parsed.customMusicUrl || parsed.custom_music_url || "";
+
+      // Map data & perbaiki path R2
       xtraData = {
         musicOption: parsed.musicOption || parsed.music_option || "none",
-        customMusicUrl: parsed.customMusicUrl || parsed.custom_music_url || "",
-        galeriFoto: Array.isArray(parsed.galeriFoto) 
-          ? parsed.galeriFoto 
-          : Array.isArray(parsed.galeri_foto) 
-          ? parsed.galeri_foto 
-          : [],
-        qrisUrl: parsed.qrisUrl || parsed.qrisImageUrl || parsed.qris_url || "",
+        customMusicUrl: fixR2Path(rawMusic),
+        galeriFoto: rawGaleri.map((img: string) => fixR2Path(img)),
+        qrisUrl: fixR2Path(rawQris),
         rekeningList: Array.isArray(parsed.rekeningList)
           ? parsed.rekeningList
           : Array.isArray(parsed.rekeningBank)
@@ -94,7 +122,11 @@ export default async function PublicInvitationPage({
             }))
           : [],
         liveStreamUrl: parsed.liveStreamUrl || parsed.live_stream_url || "",
-        videoTeaserUrl: parsed.videoTeaserUrl || parsed.videoPrewedUrl || parsed.video_teaser_url || "",
+        videoTeaserUrl:
+          parsed.videoTeaserUrl ||
+          parsed.videoPrewedUrl ||
+          parsed.video_teaser_url ||
+          "",
         loveStoryList: Array.isArray(parsed.loveStoryList)
           ? parsed.loveStoryList
           : Array.isArray(parsed.loveStory)

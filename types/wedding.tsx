@@ -57,7 +57,8 @@ export interface PremiumWeddingContent extends BasicWeddingContent {
 // --- KONTEN PAKET ENTERPRISE ---
 export interface EnterpriseWeddingContent extends PremiumWeddingContent {
   enableRSVP?: boolean;
-  whatsappPengantin?: string; // <-- TAMBAHKAN BARIS INI
+  whatsappPengantin?: string;
+  enableWaNotification?: boolean; 
   enableRsvp?: boolean;
   enableGuestBook?: boolean;
   liveStreamUrl?: string;

@@ -1,5 +1,17 @@
 import { NextResponse } from "next/server";
-import { S3Client, PutObjectCommand, ListObjectsV2Command, DeleteObjectsCommand } from "@aws-sdk/client-s3";
+import {
+  S3Client,
+  PutObjectCommand,
+  ListObjectsV2Command,
+  DeleteObjectsCommand,
+} from "@aws-sdk/client-s3";
+
+// Helper untuk memastikan tidak ada dobel slash pada URL
+function formatR2Url(domain: string, fileName: string): string {
+  const cleanDomain = domain.replace(/\/+$/, ""); // Hapus trailing slash di domain jika ada
+  const cleanFileName = fileName.replace(/^\/+/, ""); // Hapus leading slash di path
+  return `${cleanDomain}/${cleanFileName}`;
+}
 
 export async function POST(request: Request) {
   try {
@@ -20,38 +32,60 @@ export async function POST(request: Request) {
     const fileName = `${slug}/${folderType}/${Date.now()}-${Math.random().toString(36).substring(2, 7)}.${fileExtension}`;
 
     // ----------------------------------------------------
-    // SKENARIO A: Berjalan di Cloudflare Pages (Production)
+    // SKENARIO A: Berjalan di Cloudflare Pages / Workers (Production)
     // ----------------------------------------------------
     let bucket: any = null;
+    let env: any = {};
+
     try {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const { getRequestContext } = require("@cloudflare/next-on-pages");
-      bucket = getRequestContext().env.MY_BUCKET; // Pastikan nama binding R2 di Cloudflare kamu 'MY_BUCKET'
+      const ctx = getRequestContext();
+      bucket = ctx.env.MY_BUCKET;
+      env = ctx.env;
     } catch (e) {
       bucket = null;
     }
 
     if (bucket) {
-      // Jika di production Cloudflare Workers/Pages, untuk qris/music kita bisa hapus prefix folder lama jika perlu, 
-      // tapi secara default S3 API di bawah ini yang paling sering dipakai untuk Localhost S3.
+      // 1. Bersihkan file lama jika folderType qris atau music
+      if (folderType === "qris" || folderType === "music") {
+        const prefix = `${slug}/${folderType}/`;
+        try {
+          const listed = await bucket.list({ prefix });
+          if (listed && listed.objects.length > 0) {
+            const deletePromises = listed.objects.map((obj: any) => bucket.delete(obj.key));
+            await Promise.all(deletePromises);
+          }
+        } catch (delErr) {
+          console.error("Gagal membersihkan file R2 Binding Cloudflare:", delErr);
+        }
+      }
+
+      // 2. Upload file ke R2 Binding
       await bucket.put(fileName, buffer, {
         httpMetadata: { contentType: file.type },
       });
 
-      const publicDomain = process.env.R2_PUBLIC_DOMAIN || "https://pub-r2.cloudflare.com";
-      const fileUrl = `${publicDomain}/${fileName}`;
+      // 3. Gunakan R2 Public Domain dari Context atau Fallback ke assets.zpack.my.id
+      const publicDomain =
+        env.R2_PUBLIC_DOMAIN ||
+        process.env.R2_PUBLIC_DOMAIN ||
+        "https://assets.zpack.my.id";
+
+      const fileUrl = formatR2Url(publicDomain, fileName);
 
       return NextResponse.json({ success: true, url: fileUrl });
     }
 
     // ----------------------------------------------------
-    // SKENARIO B: Berjalan di Localhost (S3 API R2)
+    // SKENARIO B: Berjalan di Localhost / Server Node.js (S3 API R2)
     // ----------------------------------------------------
     const accountId = process.env.R2_ACCOUNT_ID;
     const accessKeyId = process.env.R2_ACCESS_KEY_ID;
     const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
     const bucketName = process.env.R2_BUCKET_NAME;
-    const publicDomain = process.env.R2_PUBLIC_DOMAIN;
+    const publicDomain = process.env.R2_PUBLIC_DOMAIN || "https://assets.zpack.my.id";
 
     if (!accountId || !accessKeyId || !secretAccessKey || !bucketName) {
       return NextResponse.json(
@@ -72,10 +106,7 @@ export async function POST(request: Request) {
       },
     });
 
-    // ----------------------------------------------------
-    // 🛠️ LOGIKA PEMBERSIHAN FILE LAMA (KHUSUS QRIS / MUSIC)
-    // ----------------------------------------------------
-    // Jika folder tipe qris atau music, bersihkan isi file lama di folder tersebut agar tidak menumpuk
+    // Bersihkan file lama jika folderType qris / music
     if (folderType === "qris" || folderType === "music") {
       const prefix = `${slug}/${folderType}/`;
       try {
@@ -94,12 +125,11 @@ export async function POST(request: Request) {
           await s3.send(deleteCmd);
         }
       } catch (delError) {
-        console.error("Gagal membersihkan file lama di R2:", delError);
+        console.error("Gagal membersihkan file lama di R2 via S3:", delError);
       }
     }
-    // ----------------------------------------------------
 
-    // Upload file baru ke R2
+    // Upload file baru ke R2 via S3 Client
     await s3.send(
       new PutObjectCommand({
         Bucket: bucketName,
@@ -109,7 +139,7 @@ export async function POST(request: Request) {
       })
     );
 
-    const fileUrl = `${publicDomain}/${fileName}`;
+    const fileUrl = formatR2Url(publicDomain, fileName);
 
     return NextResponse.json({ success: true, url: fileUrl });
   } catch (error: any) {
