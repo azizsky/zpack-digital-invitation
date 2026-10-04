@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-export const runtime = "edge";
+export const runtime = "nodejs";
 
 async function queryRemoteD1(sql: string, params: any[] = []) {
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
