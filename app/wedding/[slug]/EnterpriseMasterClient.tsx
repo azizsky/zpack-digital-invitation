@@ -65,12 +65,7 @@ export interface XtraData {
   videoPrewedUrl?: string;
   loveStoryList?: LoveStory[];
   loveStory?: LoveStory[];
-  alamatKadoFisik?: string;
-  noHpPengantin?: string;
-  noHp?: string;
-  whatsappPengantin?: string;
   enableRsvp?: boolean;
-  enableWaNotification?: boolean;
 }
 
 interface EnterpriseMasterClientProps {
@@ -144,8 +139,11 @@ export default function EnterpriseMasterClient({
   const isEnterprise = pkg === "enterprise" || pkg === "exclusive" || pkg === "pro";
 
   // Flag Kondisional Fitur dari XtraData
-  const isRsvpActive = Boolean(xtraData?.enableRsvp ?? true);
-  const isWaNotifActive = isRsvpActive ? Boolean(xtraData?.enableWaNotification ?? false) : false;
+  // 1. Parse xtraData jika bentuknya masih String JSON
+// 1. Parse xtraData jika bentuknya String JSON
+const parsedXtra = typeof xtraData === "string" ? JSON.parse(xtraData || "{}") : (xtraData || {});
+ 
+const isRsvpActive = parsedXtra?.enableRsvp !== undefined ? Boolean(parsedXtra.enableRsvp) : true;
 
   // State Management
   const [isOpen, setIsOpen] = useState<boolean>(isBasic);
@@ -159,6 +157,7 @@ export default function EnterpriseMasterClient({
     minutes: 0,
     seconds: 0,
   });
+
 
   // RSVP Form State
   const [namaTamu, setNamaTamu] = useState<string>("");
@@ -227,6 +226,15 @@ export default function EnterpriseMasterClient({
       fetchRsvpList();
     }
   }, [fetchRsvpList, isRsvpActive]);
+
+  useEffect(() => {
+    if (activeInvitationId) {
+      const storageKey = `zpack_rsvp_sent_${activeInvitationId}`;
+      if (localStorage.getItem(storageKey)) {
+        setRsvpError("Anda sudah pernah mengirimkan konfirmasi kehadiran.");
+      }
+    }
+  }, [activeInvitationId]);
 
   // AUDIO SOURCE MANAGER
   const audioSource = useMemo(() => {
@@ -382,71 +390,73 @@ export default function EnterpriseMasterClient({
   };
 
   const handleRsvpSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!namaTamu.trim()) return;
+  e.preventDefault();
+  if (!namaTamu.trim()) return;
 
-    setIsSubmittingRsvp(true);
-    setRsvpError(null);
+  // 1. KUNCI LOCALSTORAGE UNTUK CEK PROTEKSI SPAM
+  const storageKey = `zpack_rsvp_sent_${activeInvitationId}`;
+  if (localStorage.getItem(storageKey)) {
+    setRsvpError("Anda sudah pernah mengirimkan konfirmasi kehadiran untuk undangan ini.");
+    return;
+  }
 
-    const targetWaNumber =
-      xtraData?.whatsappPengantin ||
-      xtraData?.noHpPengantin ||
-      xtraData?.noHp ||
-      "";
+  setIsSubmittingRsvp(true);
+  setRsvpError(null);
 
-    try {
-      const response = await fetch("/api/rsvp", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          invitationId: activeInvitationId,
-          nama: namaTamu,
-          kehadiran: statusKehadiran,
-          pesan: pesanTamu,
-          jumlahOrang: jumlahOrang,
-          enableWaNotification: isWaNotifActive,
-          whatsappPengantin: targetWaNumber,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || "Gagal menyimpan konfirmasi.");
-      }
-
-      setRsvpSuccess(true);
-
-      const newRsvpItem: RsvpItem = {
-        id: Date.now().toString(),
+  try {
+    const response = await fetch("/api/rsvp", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        invitationId: activeInvitationId,
         nama: namaTamu,
         kehadiran: statusKehadiran,
-        pesan: pesanTamu || "-",
-        created_at: new Date().toISOString(),
-      };
+        pesan: pesanTamu,
+        jumlahOrang: jumlahOrang,
+      }),
+    });
 
-      setRsvpList((prev) => [newRsvpItem, ...prev]);
-
-      if (typeof fetchRsvpList === "function") {
-        fetchRsvpList();
-      }
-
-      setNamaTamu("");
-      setPesanTamu("");
-      setJumlahOrang("1");
-      setStatusKehadiran("Hadir");
-
-      setTimeout(() => {
-        setRsvpSuccess(false);
-      }, 4000);
-    } catch (err: any) {
-      console.error("Gagal RSVP:", err);
-      setRsvpError(err.message || "Gagal mengirim data ke server.");
-    } finally {
-      setIsSubmittingRsvp(false);
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.message || "Gagal menyimpan konfirmasi.");
     }
-  };
+
+    // 2. SIMPAN FLAG DI LOCALSTORAGE AGAR TIDAK BISA KIRIM LAGI
+    localStorage.setItem(storageKey, "true");
+
+    setRsvpSuccess(true);
+
+    const newRsvpItem: RsvpItem = {
+      id: Date.now().toString(),
+      nama: namaTamu,
+      kehadiran: statusKehadiran,
+      pesan: pesanTamu || "-",
+      created_at: new Date().toISOString(),
+    };
+
+    setRsvpList((prev) => [newRsvpItem, ...prev]);
+
+    if (typeof fetchRsvpList === "function") {
+      fetchRsvpList();
+    }
+
+    setNamaTamu("");
+    setPesanTamu("");
+    setJumlahOrang("1");
+    setStatusKehadiran("Hadir");
+
+    setTimeout(() => {
+      setRsvpSuccess(false);
+    }, 4000);
+  } catch (err: any) {
+    console.error("Gagal RSVP:", err);
+    setRsvpError(err.message || "Gagal mengirim data ke server.");
+  } finally {
+    setIsSubmittingRsvp(false);
+  }
+};
 
   
 
@@ -800,16 +810,6 @@ export default function EnterpriseMasterClient({
                 </div>
               )}
 
-              {xtraData?.alamatKadoFisik && (
-                <div className={styles.giftStyles.addressCard}>
-                  <p className={styles.giftStyles.addressLabel}>
-                    Alamat Pengiriman Kado Fisik
-                  </p>
-                  <p className={styles.giftStyles.addressText}>
-                    {xtraData.alamatKadoFisik}
-                  </p>
-                </div>
-              )}
             </div>
           </section>
         )}

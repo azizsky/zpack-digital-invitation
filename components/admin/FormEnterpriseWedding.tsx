@@ -36,9 +36,7 @@ export default function FormEnterpriseWedding({ onSubmit, initialData }: FormEnt
     
 
     // Fitur Khusus Enterprise & Kontak / RSVP
-    whatsappPengantin: initialData?.whatsappPengantin || "",
     enableRsvp: initialData?.enableRsvp ?? true,
-    enableWaNotification: initialData?.enableWaNotification ?? false,
     musicOption: initialData?.musicOption || "preset",
     customMusicUrl: initialData?.customMusicUrl || "",
     liveStreamUrl: initialData?.liveStreamUrl || "",
@@ -113,25 +111,23 @@ export default function FormEnterpriseWedding({ onSubmit, initialData }: FormEnt
   }, []);
 
   // Sinkronisasi jika initialData berubah
+// Sinkronisasi jika initialData berubah
  useEffect(() => {
   if (initialData) {
-    // 1. Ambil nilai enableRsvp (cek direct property atau di dalam xtraData jika ada)
-    const rawRsvp = initialData.enableRsvp ?? (initialData as any).xtraData?.enableRsvp;
-    const isRsvpActive = rawRsvp !== undefined ? Boolean(rawRsvp) : false;
+    // 1. Ambil nilai enableRsvp baik dari root initialData maupun dari xtraData
+    const rawRsvp =
+      initialData.enableRsvp !== undefined
+        ? initialData.enableRsvp
+        : (initialData as any).xtraData?.enableRsvp;
 
-    // 2. Ambil nilai enableWaNotification
-    const rawWaNotif = initialData.enableWaNotification ?? (initialData as any).xtraData?.enableWaNotification;
-    const isWaNotifActive = rawWaNotif !== undefined ? Boolean(rawWaNotif) : false;
+    // 2. Jika rawRsvp terdefinisi (baik true maupun false), gunakan nilainya.
+    // Jika benar-benar undefined (misal undangan baru / data lama), default-kan ke true.
+    const isRsvpActive = rawRsvp !== undefined ? Boolean(rawRsvp) : true;
 
     setFormData((prev) => ({
       ...prev,
       ...initialData,
-      // Paksa nilai boolean yang tepat
-      enableRsvp: isRsvpActive,
-      // Jika enableRsvp false, paksakan enableWaNotification jadi false saat memuat data edit
-      enableWaNotification: isRsvpActive ? isWaNotifActive : false,
-      whatsappPengantin: isRsvpActive ? (initialData.whatsappPengantin || "") : "",
-
+      enableRsvp: isRsvpActive, // Dipastikan akurat (true/false)
       loveStory: initialData.loveStory?.length ? initialData.loveStory : prev.loveStory,
       rekeningBank: initialData.rekeningBank?.length ? initialData.rekeningBank : prev.rekeningBank,
       galeriFoto: initialData.galeriFoto || [],
@@ -438,10 +434,7 @@ export default function FormEnterpriseWedding({ onSubmit, initialData }: FormEnt
 
       const finalPayload: EnterpriseWeddingContent = {
         ...formData,
-        enableRsvp: isRsvpActive,
-        // Jika enableRsvp false, matikan WaNotification & kosongkan no WA pengantin
-        enableWaNotification: isRsvpActive ? Boolean(formData.enableWaNotification) : false,
-        whatsappPengantin: isRsvpActive ? (formData.whatsappPengantin || "").trim() : "",
+        enableRsvp: Boolean(formData.enableRsvp),
         liveStreamUrl: formatEmbedUrl(formData.liveStreamUrl || ""),
         videoPrewedUrl: finalVideoUrl,
         qrisImageUrl: finalQrisUrl,
@@ -485,93 +478,32 @@ export default function FormEnterpriseWedding({ onSubmit, initialData }: FormEnt
         onChange={handleChange}
         templates={templates}
       />
+            
+      {/* PENGATURAN BUKU TAMU & RSVP */}
+      <div className="rounded-xl border border-amber-500/35 bg-amber-950/10 p-4">
+        <div className="flex items-center justify-between">
+          <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center gap-2">
+            💬 Pengaturan Buku Tamu & RSVP
+          </h4>
 
-   {/* KONTAK WHATSAPP & RSVP CONFIG */}
-<div className="rounded-xl border border-amber-500/35 bg-amber-950/10 p-4 space-y-4">
-  <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center gap-2">
-    💬 Pengaturan Buku Tamu & Notifikasi WA
-  </h4>
-
-  <div className="space-y-4">
-    {/* 1. TOGGLE UTAMA: AKTIFKAN FITUR RSVP & BUKU TAMU */}
-    <div className="flex items-center gap-3">
-      <input
-        type="checkbox"
-        id="enableRsvp"
-        name="enableRsvp"
-        checked={formData.enableRsvp ?? true}
-        onChange={(e) => {
-          const isChecked = e.target.checked;
-          setFormData((prev) => ({
-            ...prev,
-            enableRsvp: isChecked,
-            // Jika RSVP dimatikan, otomatis matikan notif WA & kosongkan nomor HP
-            enableWaNotification: isChecked ? prev.enableWaNotification : false,
-            whatsappPengantin: isChecked ? prev.whatsappPengantin : "",
-          }));
-        }}
-        className="h-4 w-4 rounded border-slate-800 bg-slate-950 text-amber-600 focus:ring-amber-500 cursor-pointer"
-      />
-      <label htmlFor="enableRsvp" className="text-xs font-semibold text-slate-200 cursor-pointer">
-        Aktifkan Fitur Buku Tamu & RSVP di Halaman Undangan
-      </label>
-    </div>
-
-    {/* 2. SUB-OPTION: HANYA MUNCUL JIKA RSVP AKTIF */}
-    {formData.enableRsvp && (
-      <div className="pl-6 border-l-2 border-amber-500/30 space-y-4 transition-all animate-fadeIn">
-        
-        {/* TOGGLE NOTIFIKASI WA (FONNTE) */}
-        <div className="flex items-start gap-3">
-          <input
-            type="checkbox"
-            id="enableWaNotification"
-            name="enableWaNotification"
-            checked={formData.enableWaNotification ?? false}
-            onChange={(e) => {
-              const isChecked = e.target.checked;
-              setFormData((prev) => ({
-                ...prev,
-                enableWaNotification: isChecked,
-                // Jika notif WA dimatikan, bersihkan input nomor HP
-                whatsappPengantin: isChecked ? prev.whatsappPengantin : "",
-              }));
-            }}
-            className="h-4 w-4 rounded border-slate-800 bg-slate-950 text-amber-600 focus:ring-amber-500 mt-0.5 cursor-pointer"
-          />
-          <div>
-            <label htmlFor="enableWaNotification" className="text-xs font-medium text-slate-300 cursor-pointer block">
-              Kirim Notifikasi Otomatis ke WhatsApp via Fonnte
-            </label>
-            <p className="text-[10px] text-slate-500 mt-0.5">
-              Setiap tamu mengisi RSVP, pengantin akan menerima pesan WA otomatis.
-            </p>
-          </div>
-        </div>
-
-        {/* 3. INPUT NOMOR HP: HANYA MUNCUL JIKA NOTIFIKASI WA DIAKTIFKAN */}
-        {formData.enableWaNotification && (
-          <div className="space-y-1 transition-all animate-fadeIn pt-1">
-            <label className="block text-xs font-medium text-amber-200">
-              Nomor WhatsApp Pengantin / Admin *
-            </label>
+          <label className="relative inline-flex items-center cursor-pointer">
             <input
-              type="text"
-              name="whatsappPengantin"
-              value={formData.whatsappPengantin || ""}
-              onChange={handleChange}
-              placeholder="Contoh: 6281234567890 (Awali dengan 62)"
-              className="w-full rounded-lg border border-amber-500/40 bg-slate-950 px-3 py-2 text-xs text-slate-200 focus:border-amber-400 focus:outline-none transition-colors"
+              type="checkbox"
+              id="enableRsvp"
+              name="enableRsvp"
+              checked={formData.enableRsvp ?? true}
+              onChange={(e) => {
+                setFormData((prev) => ({
+                  ...prev,
+                  enableRsvp: e.target.checked,
+                }));
+              }}
+              className="sr-only peer"
             />
-            <p className="text-[10px] text-slate-400">
-              Pastikan nomor diawali kode negara <b>62</b> tanpa tanda + atau angka 0 di depan.
-            </p>
-          </div>
-        )}
+            <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-500"></div>
+          </label>
+        </div>
       </div>
-    )}
-  </div>
-</div>
 
 
       {/* Media & Live Streaming */}

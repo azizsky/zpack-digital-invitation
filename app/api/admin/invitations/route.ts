@@ -1,4 +1,3 @@
-
 import { NextResponse } from "next/server";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import {
@@ -134,7 +133,6 @@ async function cleanupR2Folder(slug: string) {
       );
 
       // Jika masih ada object berikutnya, bersihkan lagi.
-      // Catatan: implementasi sederhana ini mempertahankan struktur lama.
       if (listedObjects.IsTruncated) {
         await cleanupR2Folder(slug);
       }
@@ -221,18 +219,23 @@ export async function DELETE(request: Request) {
       );
     }
 
+    // 1. Cek slug undangan untuk pembersihan R2
     const targetData = await executeQuery(
       "SELECT slug FROM invitations WHERE id = ?",
       [id]
     );
 
-    if (
-      targetData &&
-      targetData.length > 0
-    ) {
+    if (targetData && targetData.length > 0) {
       await cleanupR2Folder(targetData[0].slug);
     }
 
+    // 2. Hapus dulu semua pesan & konfirmasi di tabel rsvp
+    await executeQuery(
+      "DELETE FROM rsvp WHERE invitation_id = ?",
+      [id]
+    );
+
+    // 3. Baru hapus data undangannya
     await executeQuery(
       "DELETE FROM invitations WHERE id = ?",
       [id]
@@ -240,15 +243,13 @@ export async function DELETE(request: Request) {
 
     return NextResponse.json({
       success: true,
-      message:
-        "Undangan dan file terkait berhasil dihapus!",
+      message: "Undangan, data RSVP, dan file terkait berhasil dihapus!",
     });
   } catch (error: any) {
     return NextResponse.json(
       {
         success: false,
-        message:
-          error.message || "Gagal menghapus",
+        message: error.message || "Gagal menghapus",
       },
       { status: 500 }
     );
@@ -301,13 +302,11 @@ export async function POST(request: Request) {
 
     const id = Date.now().toString();
 
-    // Ekstraksi seluruh fitur tambahan
+    // Ekstraksi fitur tambahan (whatsappPengantin & enableWaNotification diabaikan/dihapus)
     const {
       musicOption,
       customMusicUrl,
-      whatsappPengantin,
       enableRsvp,
-      enableWaNotification,
       liveStreamUrl,
       videoPrewedUrl,
       galeriFoto,
@@ -317,27 +316,18 @@ export async function POST(request: Request) {
       ...basic
     } = content;
 
-    // Susun XtraData lengkap
-const xtraData = JSON.stringify({
-  musicOption: musicOption || "none",
-  customMusicUrl: customMusicUrl || "",
-  whatsappPengantin:
-    whatsappPengantin || "",
-  enableRsvp: enableRsvp ?? true,
-  enableWaNotification: true,
-  liveStreamUrl:
-    liveStreamUrl || "",
-  videoPrewedUrl:
-    videoPrewedUrl || "",
-  galeriFoto:
-    galeriFoto || [],
-  loveStory:
-    loveStory || [],
-  qrisImageUrl:
-    qrisImageUrl || "",
-  rekeningBank:
-    rekeningBank || [],
-});
+    // Susun XtraData tanpa WhatsApp
+    const xtraData = JSON.stringify({
+      musicOption: musicOption || "none",
+      customMusicUrl: customMusicUrl || "",
+      enableRsvp: enableRsvp ?? true,
+      liveStreamUrl: liveStreamUrl || "",
+      videoPrewedUrl: videoPrewedUrl || "",
+      galeriFoto: galeriFoto || [],
+      loveStory: loveStory || [],
+      qrisImageUrl: qrisImageUrl || "",
+      rekeningBank: rekeningBank || [],
+    });
 
     const insertQuery = `
       INSERT INTO invitations (
@@ -357,8 +347,7 @@ const xtraData = JSON.stringify({
       slug,
       category || "wedding",
       pkg || "basic",
-      basic.templateId ||
-        "theme-minimalist",
+      basic.templateId || "theme-minimalist",
       basic.namaPanggilanPria || "",
       basic.namaPanggilanWanita || "",
       basic.namaLengkapPria || "",
@@ -376,28 +365,19 @@ const xtraData = JSON.stringify({
       xtraData,
     ];
 
-    await executeQuery(
-      insertQuery,
-      insertParams
-    );
+    await executeQuery(insertQuery, insertParams);
 
     return NextResponse.json({
       success: true,
-      message:
-        "Undangan berhasil disimpan ke Database D1!",
+      message: "Undangan berhasil disimpan ke Database D1!",
     });
   } catch (error: any) {
-    console.error(
-      "Error Save Invitation:",
-      error
-    );
+    console.error("Error Save Invitation:", error);
 
     return NextResponse.json(
       {
         success: false,
-        message:
-          error.message ||
-          "Gagal menyimpan ke D1",
+        message: error.message || "Gagal menyimpan ke D1",
       },
       { status: 500 }
     );
@@ -424,20 +404,17 @@ export async function PUT(request: Request) {
       return NextResponse.json(
         {
           success: false,
-          message:
-            "ID, Slug, dan data undangan wajib diisi!",
+          message: "ID, Slug, dan data undangan wajib diisi!",
         },
         { status: 400 }
       );
     }
 
-    // Ekstraksi seluruh fitur tambahan
+    // Ekstraksi fitur tambahan (whatsappPengantin & enableWaNotification diabaikan/dihapus)
     const {
       musicOption,
       customMusicUrl,
-      whatsappPengantin,
       enableRsvp,
-      enableWaNotification,
       liveStreamUrl,
       videoPrewedUrl,
       galeriFoto,
@@ -447,27 +424,18 @@ export async function PUT(request: Request) {
       ...basic
     } = content;
 
-   // Susun XtraData lengkap saat update
-const xtraData = JSON.stringify({
-  musicOption: musicOption || "none",
-  customMusicUrl: customMusicUrl || "",
-  whatsappPengantin:
-    whatsappPengantin || "",
-  enableRsvp: enableRsvp ?? true,
-  enableWaNotification: true,
-  liveStreamUrl:
-    liveStreamUrl || "",
-  videoPrewedUrl:
-    videoPrewedUrl || "",
-  galeriFoto:
-    galeriFoto || [],
-  loveStory:
-    loveStory || [],
-  qrisImageUrl:
-    qrisImageUrl || "",
-  rekeningBank:
-    rekeningBank || [],
-});
+    // Susun XtraData tanpa WhatsApp
+    const xtraData = JSON.stringify({
+      musicOption: musicOption || "none",
+      customMusicUrl: customMusicUrl || "",
+      enableRsvp: enableRsvp ?? true,
+      liveStreamUrl: liveStreamUrl || "",
+      videoPrewedUrl: videoPrewedUrl || "",
+      galeriFoto: galeriFoto || [],
+      loveStory: loveStory || [],
+      qrisImageUrl: qrisImageUrl || "",
+      rekeningBank: rekeningBank || [],
+    });
 
     const updateQuery = `
       UPDATE invitations SET
@@ -486,8 +454,7 @@ const xtraData = JSON.stringify({
       slug,
       category || "wedding",
       pkg || "basic",
-      basic.templateId ||
-        "theme-minimalist",
+      basic.templateId || "theme-minimalist",
       basic.namaPanggilanPria || "",
       basic.namaPanggilanWanita || "",
       basic.namaLengkapPria || "",
@@ -506,28 +473,19 @@ const xtraData = JSON.stringify({
       id,
     ];
 
-    await executeQuery(
-      updateQuery,
-      updateParams
-    );
+    await executeQuery(updateQuery, updateParams);
 
     return NextResponse.json({
       success: true,
-      message:
-        "Undangan berhasil diperbarui!",
+      message: "Undangan berhasil diperbarui!",
     });
   } catch (error: any) {
-    console.error(
-      "Error Update Invitation:",
-      error
-    );
+    console.error("Error Update Invitation:", error);
 
     return NextResponse.json(
       {
         success: false,
-        message:
-          error.message ||
-          "Gagal memperbarui data",
+        message: error.message || "Gagal memperbarui data",
       },
       { status: 500 }
     );

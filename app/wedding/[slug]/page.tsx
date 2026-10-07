@@ -77,8 +77,9 @@ export default async function PublicInvitationPage({
     notFound();
   }
 
-  // Default fallback struktur xtraData
+  // Default fallback struktur xtraData (TAMBAHKAN enableRsvp)
   let xtraData = {
+    enableRsvp: true, // <-- 1. Tambahkan default value di sini
     musicOption: "none",
     customMusicUrl: "",
     galeriFoto: [] as string[],
@@ -118,6 +119,13 @@ export default async function PublicInvitationPage({
 
       // Map data & perbaiki path R2
       xtraData = {
+        // <-- 2. TAMBAHKAN KONDISI INI UNTUK PASSTHROUGH ENABLE_RSVP
+        enableRsvp:
+          parsed.enableRsvp !== undefined
+            ? Boolean(parsed.enableRsvp)
+            : parsed.enable_rsvp !== undefined
+            ? Boolean(parsed.enable_rsvp)
+            : true,
         musicOption: parsed.musicOption || parsed.music_option || "none",
         customMusicUrl: fixR2Path(rawMusic),
         galeriFoto: rawGaleri.map((img: string) => fixR2Path(img)),

@@ -10,11 +10,10 @@ interface FormPremiumWeddingProps {
 }
 
 export default function FormPremiumWedding({ onSubmit, initialData }: FormPremiumWeddingProps) {
-  // 1. Inisialisasi State Lengkap (Termasuk noWhatsapp & enableRsvp)
+  // 1. Inisialisasi State Lengkap (Tanpa noWhatsapp)
   const [formData, setFormData] = useState<PremiumWeddingContent>({
     templateId: "theme-minimalist",
     slug: "",
-    noWhatsapp: "",
     enableRsvp: true,
     namaPanggilanPria: "",
     namaPanggilanWanita: "",
@@ -37,7 +36,7 @@ export default function FormPremiumWedding({ onSubmit, initialData }: FormPremiu
   });
 
   // State untuk menampung data templates dari API
- const [templates, setTemplates] = useState<any[]>([]);
+  const [templates, setTemplates] = useState<any[]>([]);
 
   // State untuk menampung list musik preset dari R2
   const [presetMusicList, setPresetMusicList] = useState<
@@ -110,7 +109,6 @@ export default function FormPremiumWedding({ onSubmit, initialData }: FormPremiu
         ...prev,
         ...initialData,
         enableRsvp: initialData.enableRsvp ?? true,
-        noWhatsapp: initialData.noWhatsapp || "",
       }));
       if (initialData.qrisImageUrl) {
         setQrisPreview(initialData.qrisImageUrl);
@@ -328,11 +326,11 @@ export default function FormPremiumWedding({ onSubmit, initialData }: FormPremiu
         </select>
       </div>
 
-      {/* 📱 KONFIGURASI RSVP (OPSIONAL) */}
-      <div className="rounded-xl border border-emerald-500/35 bg-emerald-950/10 p-4 space-y-3">
+      {/* 💌 FITUR RSVP */}
+      <div className="rounded-xl border border-emerald-500/35 bg-emerald-950/10 p-4">
         <div className="flex items-center justify-between">
           <h4 className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
-            💌 FITUR RSVP VIA WHATSAPP (OPSIONAL)
+            💌 FITUR RSVP & UCAPAN
           </h4>
           <label className="relative inline-flex items-center cursor-pointer">
             <input
@@ -346,25 +344,6 @@ export default function FormPremiumWedding({ onSubmit, initialData }: FormPremiu
             <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
           </label>
         </div>
-
-        {formData.enableRsvp && (
-          <div className="space-y-1.5 pt-1">
-            <label className="block text-xs font-medium text-slate-300">
-              Nomor WhatsApp Pengantin (Penerima RSVP)
-            </label>
-            <input
-              type="text"
-              name="noWhatsapp"
-              value={formData.noWhatsapp || ""}
-              onChange={handleChange}
-              placeholder="Contoh: 081234567890 (Kosongkan jika tidak memakai Fonnte)"
-              className="w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 focus:border-emerald-500 focus:outline-none"
-            />
-            <p className="text-[10px] text-slate-400">
-              Jika diisi, konfirmasi kehadiran tamu akan otomatis terkirim ke WhatsApp pengantin via Fonnte.
-            </p>
-          </div>
-        )}
       </div>
 
       {/* Galeri Foto */}
