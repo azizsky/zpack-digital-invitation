@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import type { Metadata } from "next";
 import EnterpriseMasterClient from "./EnterpriseMasterClient";
 
 async function getInvitationBySlug(slug: string) {
@@ -36,6 +37,56 @@ async function getInvitationBySlug(slug: string) {
   }
 }
 
+ export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}): Promise<Metadata> {
+  const { slug } = await params;
+
+  const invitation = await getInvitationBySlug(slug);
+
+  if (!invitation) {
+    return {
+      title: "Undangan Digital Zpack",
+    };
+  }
+
+  const namaPria = invitation.nama_pria || "Pengantin Pria";
+  const namaWanita = invitation.nama_wanita || "Pengantin Wanita";
+
+  const baseUrl =
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    "https://zpack-digital-invitation.zpack.workers.dev";
+
+  const imageUrl = `${baseUrl}/wedding/${slug}/opengraph-image`;
+
+  return {
+    title: `${namaPria} & ${namaWanita}`,
+    description: `Undangan Pernikahan ${namaPria} & ${namaWanita}`,
+    openGraph: {
+      title: `${namaPria} & ${namaWanita}`,
+      description: `Undangan Pernikahan ${namaPria} & ${namaWanita}`,
+      url: `${baseUrl}/wedding/${slug}`,
+      siteName: "Zpack Digital Invitation",
+      type: "website",
+      images: [
+        {
+          url: imageUrl,
+          width: 1200,
+          height: 630,
+          alt: `${namaPria} & ${namaWanita}`,
+        },
+      ],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: `${namaPria} & ${namaWanita}`,
+      description: `Undangan Pernikahan ${namaPria} & ${namaWanita}`,
+      images: [imageUrl],
+    },
+  };
+}
 // HELPER UNTUK MEMPERBAIKI PATH R2/IMAGE RELATIF
 function fixR2Path(pathStr: string | undefined): string {
   if (!pathStr) return "";
