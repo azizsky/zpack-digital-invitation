@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
+
 import EnterpriseMasterClient from "./EnterpriseMasterClient";
 
 async function getInvitationBySlug(slug: string) {
@@ -22,13 +23,15 @@ async function getInvitationBySlug(slug: string) {
           sql: "SELECT * FROM invitations WHERE slug = ?",
           params: [slug],
         }),
-        cache: "no-store", // Mengabaikan cache server agar data selalu paling baru
+        cache: "no-store",
       }
     );
 
     const json = await res.json();
 
-    if (!json.success || !json.result[0]?.results?.length) return null;
+    if (!json.success || !json.result[0]?.results?.length) {
+      return null;
+    }
 
     return json.result[0].results[0];
   } catch (error) {
@@ -37,7 +40,10 @@ async function getInvitationBySlug(slug: string) {
   }
 }
 
- export async function generateMetadata({
+/**
+ * Metadata untuk preview WhatsApp / Facebook / Telegram / dll.
+ */
+export async function generateMetadata({
   params,
 }: {
   params: Promise<{ slug: string }>;
@@ -63,13 +69,16 @@ async function getInvitationBySlug(slug: string) {
 
   return {
     title: `${namaPria} & ${namaWanita}`,
+
     description: `Undangan Pernikahan ${namaPria} & ${namaWanita}`,
+
     openGraph: {
       title: `${namaPria} & ${namaWanita}`,
       description: `Undangan Pernikahan ${namaPria} & ${namaWanita}`,
       url: `${baseUrl}/wedding/${slug}`,
       siteName: "Zpack Digital Invitation",
       type: "website",
+
       images: [
         {
           url: imageUrl,
@@ -79,6 +88,7 @@ async function getInvitationBySlug(slug: string) {
         },
       ],
     },
+
     twitter: {
       card: "summary_large_image",
       title: `${namaPria} & ${namaWanita}`,
@@ -87,6 +97,7 @@ async function getInvitationBySlug(slug: string) {
     },
   };
 }
+
 // HELPER UNTUK MEMPERBAIKI PATH R2/IMAGE RELATIF
 function fixR2Path(pathStr: string | undefined): string {
   if (!pathStr) return "";
@@ -101,8 +112,12 @@ function fixR2Path(pathStr: string | undefined): string {
   // Bersihkan leading slash
   clean = clean.replace(/^\/+/, "");
 
-  // Jika path belum diawali 'invitations/' dan bukan 'preset-music/', tambahkan 'invitations/'
-  if (!clean.startsWith("invitations/") && !clean.startsWith("preset-music/")) {
+  // Jika path belum diawali invitations/ dan bukan preset-music/,
+  // tambahkan invitations/
+  if (
+    !clean.startsWith("invitations/") &&
+    !clean.startsWith("preset-music/")
+  ) {
     clean = `invitations/${clean}`;
   }
 
@@ -114,7 +129,7 @@ export default async function PublicInvitationPage({
 }: {
   params: Promise<{ slug: string }>;
 }) {
-  // Safe resolve params untuk kompatibilitas Next.js App Router
+  // Resolve params untuk kompatibilitas Next.js App Router
   const resolvedParams = await Promise.resolve(params);
   const { slug } = resolvedParams;
 
@@ -128,20 +143,24 @@ export default async function PublicInvitationPage({
     notFound();
   }
 
-  // Default fallback struktur xtraData (TAMBAHKAN enableRsvp)
+  // Default fallback struktur xtraData
   let xtraData = {
-    enableRsvp: true, // <-- 1. Tambahkan default value di sini
+    enableRsvp: true,
     musicOption: "none",
     customMusicUrl: "",
     galeriFoto: [] as string[],
+
     qrisUrl: "",
+
     rekeningList: [] as {
       bank: string;
       norek: string;
       atas_nama: string;
     }[],
+
     liveStreamUrl: "",
     videoTeaserUrl: "",
+
     loveStoryList: [] as {
       tahun_atau_tanggal: string;
       judul: string;
@@ -163,47 +182,76 @@ export default async function PublicInvitationPage({
         : [];
 
       const rawQris =
-        parsed.qrisUrl || parsed.qrisImageUrl || parsed.qris_url || "";
+        parsed.qrisUrl ||
+        parsed.qrisImageUrl ||
+        parsed.qris_url ||
+        "";
 
       const rawMusic =
-        parsed.customMusicUrl || parsed.custom_music_url || "";
+        parsed.customMusicUrl ||
+        parsed.custom_music_url ||
+        "";
 
-      // Map data & perbaiki path R2
       xtraData = {
-        // <-- 2. TAMBAHKAN KONDISI INI UNTUK PASSTHROUGH ENABLE_RSVP
         enableRsvp:
           parsed.enableRsvp !== undefined
             ? Boolean(parsed.enableRsvp)
             : parsed.enable_rsvp !== undefined
             ? Boolean(parsed.enable_rsvp)
             : true,
-        musicOption: parsed.musicOption || parsed.music_option || "none",
+
+        musicOption:
+          parsed.musicOption ||
+          parsed.music_option ||
+          "none",
+
         customMusicUrl: fixR2Path(rawMusic),
-        galeriFoto: rawGaleri.map((img: string) => fixR2Path(img)),
+
+        galeriFoto: rawGaleri.map((img: string) =>
+          fixR2Path(img)
+        ),
+
         qrisUrl: fixR2Path(rawQris),
+
         rekeningList: Array.isArray(parsed.rekeningList)
           ? parsed.rekeningList
           : Array.isArray(parsed.rekeningBank)
           ? parsed.rekeningBank.map((r: any) => ({
               bank: r.bank || "",
               norek: r.noRek || r.norek || "",
-              atas_nama: r.atasNama || r.atas_nama || "",
+              atas_nama:
+                r.atasNama ||
+                r.atas_nama ||
+                "",
             }))
           : [],
-        liveStreamUrl: parsed.liveStreamUrl || parsed.live_stream_url || "",
+
+        liveStreamUrl:
+          parsed.liveStreamUrl ||
+          parsed.live_stream_url ||
+          "",
+
         videoTeaserUrl:
           parsed.videoTeaserUrl ||
           parsed.videoPrewedUrl ||
           parsed.video_teaser_url ||
           "",
+
         loveStoryList: Array.isArray(parsed.loveStoryList)
           ? parsed.loveStoryList
           : Array.isArray(parsed.loveStory)
           ? parsed.loveStory.map((l: any) => ({
               tahun_atau_tanggal:
-                l.tahun || l.tahun_atau_tanggal || "",
+                l.tahun ||
+                l.tahun_atau_tanggal ||
+                "",
+
               judul: l.judul || "",
-              cerita: l.deskripsi || l.cerita || "",
+
+              cerita:
+                l.deskripsi ||
+                l.cerita ||
+                "",
             }))
           : [],
       };
