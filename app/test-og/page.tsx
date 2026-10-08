@@ -1,3 +1,4 @@
+
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -11,7 +12,7 @@ export const metadata: Metadata = {
     type: "website",
     images: [
       {
-        url: "https://zpack-digital-invitation.zpack.workers.dev/wedding/latif-nanda/opengraph-image",
+        url: "https://assets.zpack.my.id/opengraph-image.png",
         width: 1200,
         height: 630,
         alt: "Test Zpack Preview",
